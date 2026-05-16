@@ -1,0 +1,43 @@
+---
+import { getCollection } from "astro:content";
+import Main from "@/layouts/Main.astro";
+import Layout from "@/layouts/Layout.astro";
+import Tag from "@/components/Tag.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import getUniqueTags from "@/utils/getUniqueTags";
+import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import { SITE } from "@/config";
+
+type Props = {
+  locale: Locale;
+};
+
+export function getStaticPaths() {
+  return SUPPORTED_LOCALES.map(locale => ({
+    params: { locale },
+    props: { locale },
+  }));
+}
+
+const { locale } = Astro.props;
+
+const posts = await getCollection("blog");
+
+let tags = getUniqueTags(posts, locale);
+---
+
+<Layout locale={locale} title={`${t(locale, "tags.title")} | ${SITE.title}`}>
+  <Header locale={locale} />
+  <Main
+    locale={locale}
+    pageTitle={t(locale, "tags.title")}
+    pageDesc={t(locale, "tags.description")}
+  >
+    <ul class="flex flex-wrap gap-6">
+      {tags.map(({ tag, tagName }) => <Tag {tag} {tagName} locale={locale} />)}
+    </ul>
+  </Main>
+  <Footer locale={locale} />
+</Layout>

@@ -1,0 +1,125 @@
+---
+import { getCollection } from "astro:content";
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import LinkButton from "@/components/LinkButton.astro";
+import Card from "@/components/Card.astro";
+import getSortedPosts from "@/utils/getSortedPosts";
+import IconRss from "@/assets/icons/IconRss.svg";
+import IconArrowRight from "@/assets/icons/IconArrowRight.svg";
+import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import { SITE } from "@/config";
+
+type Props = {
+  locale: Locale;
+};
+
+export function getStaticPaths() {
+  return SUPPORTED_LOCALES.map(locale => ({
+    params: { locale },
+    props: { locale },
+  }));
+}
+
+const { locale } = Astro.props;
+
+const posts = await getCollection("blog");
+
+const sortedPosts = getSortedPosts(posts, locale);
+const featuredPosts = sortedPosts.filter(({ data }) => data.featured);
+const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
+---
+
+<Layout locale={locale}>
+  <Header locale={locale} />
+  <main
+    id="main-content"
+    data-back-url={`/${locale}/`}
+    data-layout="index"
+    class="app-layout"
+  >
+    <section id="hero" class:list={["pt-8 pb-6", "border-b border-border"]}>
+      <h1 class="my-4 inline-block text-4xl font-bold sm:my-8 sm:text-5xl">
+        {t(locale, "home.hero")}
+      </h1>
+      <a
+        target="_blank"
+        href={`/${locale}/rss.xml`}
+        class="inline-block"
+        aria-label={t(locale, "rss.feed")}
+        title={t(locale, "rss.feed")}
+      >
+        <IconRss
+          width={20}
+          height={20}
+          class="scale-125 stroke-accent stroke-3 rtl:-rotate-90"
+        />
+        <span class="sr-only">{t(locale, "rss.feed")}</span>
+      </a>
+
+      <p>{t(locale, "home.intro")}</p>
+    </section>
+
+    {
+      featuredPosts.length > 0 && (
+        <section
+          id="featured"
+          class:list={[
+            "pt-12 pb-6",
+            { "border-b border-border": recentPosts.length > 0 },
+          ]}
+        >
+          <h2 class="text-2xl font-semibold tracking-wide">
+            {t(locale, "home.featured")}
+          </h2>
+          <ul>
+            {featuredPosts.map(data => (
+              <Card locale={locale} variant="h3" {...data} />
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      recentPosts.length > 0 && (
+        <section id="recent-posts" class="pt-12 pb-6">
+          <h2 class="text-2xl font-semibold tracking-wide">
+            {t(locale, "home.recentPosts")}
+          </h2>
+          <ul>
+            {recentPosts.map(
+              (data, index) =>
+                index < SITE.postPerIndex && (
+                  <Card locale={locale} variant="h3" {...data} />
+                )
+            )}
+          </ul>
+        </section>
+      )
+    }
+
+    <div class="my-8 text-center">
+      <LinkButton href={`/${locale}/posts/`}>
+        {t(locale, "home.allPosts")}
+        <IconArrowRight class="inline-block rtl:-rotate-180" />
+      </LinkButton>
+    </div>
+  </main>
+  <Footer locale={locale} />
+</Layout>
+
+<script>
+  document.addEventListener("astro:page-load", () => {
+    const mainContent = document.querySelector("#main-content");
+    if (!(mainContent instanceof HTMLElement)) return;
+
+    const indexLayout = mainContent?.dataset?.layout;
+    const backUrl = mainContent?.dataset?.backUrl;
+    if (indexLayout) {
+      sessionStorage.setItem("backUrl", backUrl ?? "/");
+    }
+  });
+</script>

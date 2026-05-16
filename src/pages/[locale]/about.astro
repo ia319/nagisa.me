@@ -1,0 +1,34 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import Breadcrumb from "@/components/Breadcrumb.astro";
+import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import { SITE } from "@/config";
+
+type Props = {
+  locale: Locale;
+};
+
+export function getStaticPaths() {
+  return SUPPORTED_LOCALES.map(locale => ({
+    params: { locale },
+    props: { locale },
+  }));
+}
+
+const { locale } = Astro.props;
+const title = t(locale, "about.title");
+---
+
+<Layout locale={locale} title={`${title} | ${SITE.title}`}>
+  <Header locale={locale} />
+  <Breadcrumb locale={locale} />
+  <main id="main-content" class="app-layout">
+    <section id="about" class="app-prose mb-28 max-w-app prose-img:border-0">
+      <h1 class="text-2xl tracking-wider sm:text-3xl">{title}</h1>
+    </section>
+  </main>
+  <Footer locale={locale} />
+</Layout>

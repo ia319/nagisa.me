@@ -1,0 +1,66 @@
+---
+import { getCollection, type CollectionEntry } from "astro:content";
+import type { GetStaticPathsOptions, Page } from "astro";
+import Main from "@/layouts/Main.astro";
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import Card from "@/components/Card.astro";
+import Pagination from "@/components/Pagination.astro";
+import getUniqueTags from "@/utils/getUniqueTags";
+import getPostsByTag from "@/utils/getPostsByTag";
+import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import { SITE } from "@/config";
+
+type Props = {
+  locale: Locale;
+  page: Page<CollectionEntry<"blog">>;
+  tagName: string;
+};
+
+export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
+  const posts = await getCollection("blog");
+
+  return SUPPORTED_LOCALES.flatMap(locale => {
+    const tags = getUniqueTags(posts, locale);
+
+    return tags.flatMap(({ tag, tagName }) => {
+      const tagPosts = getPostsByTag(posts, tag, locale);
+
+      return paginate(tagPosts, {
+        params: { locale, tag },
+        props: { locale, tagName },
+        pageSize: SITE.postPerPage,
+      });
+    });
+  });
+}
+
+const tag = Astro.params.tag ?? "";
+const { page, locale, tagName } = Astro.props;
+---
+
+<Layout
+  locale={locale}
+  title={`${t(locale, "tag.titlePrefix")} ${tagName} | ${SITE.title}`}
+>
+  <Header locale={locale} />
+  <Main
+    locale={locale}
+    pageTitle={[t(locale, "tag.titlePrefix"), `${tagName}`]}
+    titleTransition={tag}
+    pageDesc={`${t(locale, "tag.descriptionPrefix")}${tagName}${t(locale, "tag.descriptionSuffix")}`}
+  >
+    <h1 slot="title" transition:name={tag}>
+      {`${t(locale, "tag.titlePrefix")}${tag}`}
+    </h1>
+    <ul>
+      {page.data.map(data => <Card locale={locale} {...data} />)}
+    </ul>
+  </Main>
+
+  <Pagination page={page} locale={locale} />
+
+  <Footer locale={locale} noMarginTop={page.lastPage > 1} />
+</Layout>
