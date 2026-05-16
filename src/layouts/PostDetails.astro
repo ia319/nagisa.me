@@ -10,17 +10,24 @@ import ShareLinks from "@/components/ShareLinks.astro";
 import BackButton from "@/components/BackButton.astro";
 import BackToTopButton from "@/components/BackToTopButton.astro";
 import { getPath } from "@/utils/getPath";
+import { findPostTranslation, getPostLocale } from "@/utils/postI18n";
 import { slugifyStr } from "@/utils/slugify";
 import IconChevronLeft from "@/assets/icons/IconChevronLeft.svg";
 import IconChevronRight from "@/assets/icons/IconChevronRight.svg";
+import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
 import { SITE } from "@/config";
 
 type Props = {
+  allPosts?: CollectionEntry<"blog">[];
+  locale?: Locale;
   post: CollectionEntry<"blog">;
   posts: CollectionEntry<"blog">[];
 };
 
-const { post, posts } = Astro.props;
+const { allPosts, post, posts, locale: propLocale } = Astro.props;
+const locale = propLocale ?? getPostLocale(post);
+const translationPosts = allPosts ?? posts;
 
 const {
   title,
@@ -48,7 +55,7 @@ if (typeof initOgImage === "string") {
 
 // Use dynamic OG image if enabled and no remote|local ogImage
 if (!ogImageUrl && SITE.dynamicOgImage) {
-  ogImageUrl = `${getPath(post.id, post.filePath)}/index.png`;
+  ogImageUrl = `${getPath(post.id, post.filePath, { locale })}/index.png`;
 }
 
 // Resolve OG image URL (or fallback to SITE.ogImage / default `og.png`)
@@ -57,6 +64,7 @@ const ogImage = ogImageUrl
   : undefined;
 
 const layoutProps = {
+  locale,
   title: `${title} | ${SITE.title}`,
   author,
   description,
@@ -69,25 +77,45 @@ const layoutProps = {
 
 /* ========== Prev/Next Posts ========== */
 
-const allPosts = posts.map(({ data: { title }, id, filePath }) => ({
+const postNavItems = posts.map(({ data: { title }, id, filePath }) => ({
   id,
   title,
   filePath,
 }));
 
-const currentPostIndex = allPosts.findIndex(a => a.id === post.id);
+const currentPostIndex = postNavItems.findIndex(a => a.id === post.id);
 
-const prevPost = currentPostIndex !== 0 ? allPosts[currentPostIndex - 1] : null;
+const prevPost =
+  currentPostIndex > 0 ? postNavItems[currentPostIndex - 1] : null;
 const nextPost =
-  currentPostIndex !== allPosts.length ? allPosts[currentPostIndex + 1] : null;
+  currentPostIndex >= 0 && currentPostIndex < postNavItems.length - 1
+    ? postNavItems[currentPostIndex + 1]
+    : null;
+
+const languageLinks = Object.fromEntries(
+  SUPPORTED_LOCALES.map(targetLocale => {
+    const translation = findPostTranslation(
+      translationPosts,
+      post,
+      targetLocale
+    );
+    const href = translation
+      ? getPath(translation.id, translation.filePath, { locale: targetLocale })
+      : `/${targetLocale}/posts/`;
+
+    return [targetLocale, href];
+  })
+) as Partial<Record<Locale, string>>;
 ---
 
 <Layout {...layoutProps}>
-  <Header />
-  <BackButton />
+  <Header locale={locale} {languageLinks} />
+  <BackButton locale={locale} />
   <main
     id="main-content"
     class:list={["app-layout pb-12", { "mt-8": !SITE.showBackButton }]}
+    data-copied-label={t(locale, "post.copied")}
+    data-copy-label={t(locale, "post.copy")}
     data-pagefind-body
   >
     <h1
@@ -119,7 +147,11 @@ const nextPost =
     <EditPost class="sm:hidden" {hideEditPost} {post} />
 
     <ul class="mt-4 mb-8 flex flex-wrap gap-4 sm:my-8">
-      {tags.map(tag => <Tag tag={slugifyStr(tag)} tagName={tag} size="sm" />)}
+      {
+        tags.map(tag => (
+          <Tag locale={locale} tag={slugifyStr(tag)} tagName={tag} size="sm" />
+        ))
+      }
     </ul>
 
     <BackToTopButton />
@@ -133,12 +165,12 @@ const nextPost =
       {
         prevPost && (
           <a
-            href={getPath(prevPost.id, prevPost.filePath)}
+            href={getPath(prevPost.id, prevPost.filePath, { locale })}
             class="flex w-full gap-1 hover:opacity-75"
           >
             <IconChevronLeft class="inline-block flex-none rtl:rotate-180" />
             <div>
-              <span>Previous Post</span>
+              <span>{t(locale, "post.previous")}</span>
               <div class="text-sm text-accent/85">{prevPost.title}</div>
             </div>
           </a>
@@ -147,11 +179,11 @@ const nextPost =
       {
         nextPost && (
           <a
-            href={getPath(nextPost.id, nextPost.filePath)}
+            href={getPath(nextPost.id, nextPost.filePath, { locale })}
             class="flex w-full justify-end gap-1 text-end hover:opacity-75 sm:col-start-2"
           >
             <div>
-              <span>Next Post</span>
+              <span>{t(locale, "post.next")}</span>
               <div class="text-sm text-accent/85">{nextPost.title}</div>
             </div>
             <IconChevronRight class="inline-block flex-none rtl:rotate-180" />
@@ -160,7 +192,7 @@ const nextPost =
       }
     </div>
   </main>
-  <Footer />
+  <Footer locale={locale} />
 </Layout>
 
 <script is:inline data-astro-rerun>
@@ -230,7 +262,9 @@ const nextPost =
   /** Attaches copy buttons to code blocks in the document,
    * allowing users to copy code easily. */
   function attachCopyButtons() {
-    const copyButtonLabel = "Copy";
+    const mainContent = document.querySelector("#main-content");
+    const copyButtonLabel = mainContent?.dataset?.copyLabel ?? "Copy";
+    const copiedButtonLabel = mainContent?.dataset?.copiedLabel ?? "Copied";
     const codeBlocks = Array.from(document.querySelectorAll("pre"));
 
     for (const codeBlock of codeBlocks) {
@@ -269,7 +303,7 @@ const nextPost =
       await navigator.clipboard.writeText(text ?? "");
 
       // visual feedback that task is completed
-      button.innerText = "Copied";
+      button.innerText = copiedButtonLabel;
 
       setTimeout(() => {
         button.innerText = copyButtonLabel;
