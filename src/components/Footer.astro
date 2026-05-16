@@ -1,14 +1,24 @@
 ---
 import type { HTMLAttributes } from "astro/types";
+import type { Locale } from "@/i18n/config";
+import { getLocaleFromPathname } from "@/i18n/routes";
+import { t } from "@/i18n/ui";
 import Socials from "./Socials.astro";
 
 const currentYear = new Date().getFullYear();
 
 type Props = {
+  locale?: Locale;
   noMarginTop?: boolean;
 } & HTMLAttributes<"footer">;
 
-const { noMarginTop = false, class: className, ...attrs } = Astro.props;
+const {
+  locale: propLocale,
+  noMarginTop = false,
+  class: className,
+  ...attrs
+} = Astro.props;
+const locale = propLocale ?? getLocaleFromPathname(Astro.url.pathname);
 ---
 
 <footer
@@ -26,7 +36,7 @@ const { noMarginTop = false, class: className, ...attrs } = Astro.props;
     <div class="my-2 flex flex-col items-center whitespace-nowrap sm:flex-row">
       <span>Copyright &#169; {currentYear}</span>
       <span class="hidden sm:inline">&nbsp;|&nbsp;</span>
-      <span>All rights reserved.</span>
+      <span>{t(locale, "footer.rights")}</span>
     </div>
   </div>
 </footer>

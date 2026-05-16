@@ -6,13 +6,31 @@ import IconArchive from "@/assets/icons/IconArchive.svg";
 import IconSunHigh from "@/assets/icons/IconSunHigh.svg";
 import IconMenuDeep from "@/assets/icons/IconMenuDeep.svg";
 import LinkButton from "./LinkButton.astro";
+import LanguageSelect from "./LanguageSelect.astro";
 import { SITE } from "@/config";
+import type { Locale } from "@/i18n/config";
+import {
+  getLocaleFromPathname,
+  getLocalizedPath,
+  stripLocaleFromPathname,
+} from "@/i18n/routes";
+import { t } from "@/i18n/ui";
+
+type Props = {
+  languageLinks?: Partial<Record<Locale, string>>;
+  locale?: Locale;
+};
 
 const { pathname } = Astro.url;
+const { languageLinks, locale: propLocale } = Astro.props;
+const locale = propLocale ?? getLocaleFromPathname(pathname);
+const normalizedPath = stripLocaleFromPathname(pathname);
 
 // Remove trailing slash from current pathname if exists
 const currentPath =
-  pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname;
+  normalizedPath.endsWith("/") && normalizedPath !== "/"
+    ? normalizedPath.slice(0, -1)
+    : normalizedPath;
 
 const isActive = (path: string) => {
   const currentPathArray = currentPath.split("/").filter(p => p.trim());
@@ -20,6 +38,8 @@ const isActive = (path: string) => {
 
   return currentPath === path || currentPathArray[0] === pathArray[0];
 };
+
+const localizedPath = (path = "/") => getLocalizedPath(locale, path);
 ---
 
 <a
@@ -27,7 +47,7 @@ const isActive = (path: string) => {
   href="#main-content"
   class="absolute start-16 -top-full z-50 bg-background px-3 py-2 text-accent backdrop-blur-lg transition-all focus:top-4"
 >
-  Skip to content
+  {t(locale, "a11y.skipToContent")}
 </a>
 
 <header
@@ -43,7 +63,7 @@ const isActive = (path: string) => {
     ]}
   >
     <a
-      href="/"
+      href={localizedPath()}
       class="absolute py-1 text-xl leading-8 font-semibold whitespace-nowrap sm:static sm:my-auto sm:text-2xl sm:leading-none"
     >
       {SITE.title}
@@ -55,9 +75,11 @@ const isActive = (path: string) => {
       <button
         id="menu-btn"
         class="focus-outline self-end p-2 sm:hidden"
-        aria-label="Open Menu"
+        aria-label={t(locale, "nav.openMenu")}
         aria-expanded="false"
         aria-controls="menu-items"
+        data-close-label={t(locale, "nav.closeMenu")}
+        data-open-label={t(locale, "nav.openMenu")}
       >
         <IconX id="close-icon" class="hidden" />
         <IconMenuDeep id="menu-icon" />
@@ -72,53 +94,65 @@ const isActive = (path: string) => {
         ]}
       >
         <li class="col-span-2">
-          <a href="/posts" class:list={{ "active-nav": isActive("/posts") }}>
-            Posts
+          <a
+            href={localizedPath("/posts")}
+            class:list={{ "active-nav": isActive("/posts") }}
+          >
+            {t(locale, "nav.posts")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href="/tags" class:list={{ "active-nav": isActive("/tags") }}>
-            Tags
+          <a
+            href={localizedPath("/tags")}
+            class:list={{ "active-nav": isActive("/tags") }}
+          >
+            {t(locale, "nav.tags")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href="/about" class:list={{ "active-nav": isActive("/about") }}>
-            About
+          <a
+            href={localizedPath("/about")}
+            class:list={{ "active-nav": isActive("/about") }}
+          >
+            {t(locale, "nav.about")}
           </a>
         </li>
         {
           SITE.showArchives && (
             <li class="col-span-2">
               <LinkButton
-                href="/archives"
+                href={localizedPath("/archives")}
                 class:list={[
                   "focus-outline flex justify-center p-3 sm:p-1",
                   {
                     "active-nav [&>svg]:stroke-accent": isActive("/archives"),
                   },
                 ]}
-                title="Archives"
-                aria-label="archives"
+                title={t(locale, "nav.archives")}
+                aria-label={t(locale, "nav.archives")}
               >
                 <IconArchive class="hidden sm:inline-block" />
-                <span class="sm:sr-only">Archives</span>
+                <span class="sm:sr-only">{t(locale, "nav.archives")}</span>
               </LinkButton>
             </li>
           )
         }
         <li class="col-span-1 flex items-center justify-center">
           <LinkButton
-            href="/search"
+            href={localizedPath("/search")}
             class:list={[
               "focus-outline flex p-3 sm:p-1",
               { "[&>svg]:stroke-accent": isActive("/search") },
             ]}
-            title="Search"
-            aria-label="search"
+            title={t(locale, "nav.search")}
+            aria-label={t(locale, "nav.search")}
           >
             <IconSearch />
-            <span class="sr-only">Search</span>
+            <span class="sr-only">{t(locale, "nav.search")}</span>
           </LinkButton>
+        </li>
+        <li class="col-span-1 flex items-center justify-center">
+          <LanguageSelect locale={locale} links={languageLinks} />
         </li>
         {
           SITE.lightAndDarkMode && (
@@ -126,7 +160,7 @@ const isActive = (path: string) => {
               <button
                 id="theme-btn"
                 class="focus-outline relative size-12 p-4 sm:size-8 hover:[&>svg]:stroke-accent"
-                title="Toggles light & dark"
+                title={t(locale, "nav.theme")}
                 aria-label="auto"
                 aria-live="polite"
               >
@@ -148,13 +182,25 @@ const isActive = (path: string) => {
     const menuIcon = document.querySelector("#menu-icon");
     const closeIcon = document.querySelector("#close-icon");
 
-    if (!menuBtn || !menuItems || !menuIcon || !closeIcon) return;
+    if (
+      !(menuBtn instanceof HTMLElement) ||
+      !menuItems ||
+      !menuIcon ||
+      !closeIcon
+    ) {
+      return;
+    }
 
     menuBtn.addEventListener("click", () => {
       const openMenu = menuBtn.getAttribute("aria-expanded") === "true";
+      const openMenuLabel = menuBtn.dataset.openLabel ?? "Open Menu";
+      const closeMenuLabel = menuBtn.dataset.closeLabel ?? "Close Menu";
 
       menuBtn.setAttribute("aria-expanded", openMenu ? "false" : "true");
-      menuBtn.setAttribute("aria-label", openMenu ? "Open Menu" : "Close Menu");
+      menuBtn.setAttribute(
+        "aria-label",
+        openMenu ? openMenuLabel : closeMenuLabel
+      );
 
       menuItems.classList.toggle("hidden");
       menuIcon.classList.toggle("hidden");

@@ -1,6 +1,23 @@
 ---
+import type { Locale } from "@/i18n/config";
+import {
+  getLocaleFromPathname,
+  getLocalizedPath,
+  stripLocaleFromPathname,
+} from "@/i18n/routes";
+import { t } from "@/i18n/ui";
+
+type Props = {
+  locale?: Locale;
+};
+
+const locale = Astro.props.locale ?? getLocaleFromPathname(Astro.url.pathname);
+
 // Remove current url path and remove trailing slash if exists
-const currentUrlPath = Astro.url.pathname.replace(/\/+$/, "");
+const currentUrlPath = stripLocaleFromPathname(Astro.url.pathname).replace(
+  /\/+$/,
+  ""
+);
 
 // Get url array from path
 // eg: /tags/tailwindcss => ['tags', 'tailwindcss']
@@ -9,7 +26,14 @@ const breadcrumbList = currentUrlPath.split("/").slice(1);
 // if breadcrumb is Home > Posts > 1 <etc>
 // replace Posts with Posts (page number)
 if (breadcrumbList[0] === "posts") {
-  breadcrumbList.splice(0, 2, `Posts (page ${breadcrumbList[1] || 1})`);
+  breadcrumbList.splice(
+    0,
+    2,
+    t(locale, "breadcrumb.postsPage").replace(
+      "{page}",
+      breadcrumbList[1] || "1"
+    )
+  );
 }
 
 // if breadcrumb is Home > Tags > [tag] > [page] <etc>
@@ -28,7 +52,9 @@ if (breadcrumbList[0] === "tags" && !isNaN(Number(breadcrumbList[2]))) {
     class="font-light [&>li]:inline [&>li:not(:last-child)>a]:hover:opacity-100"
   >
     <li>
-      <a href="/" class="opacity-80">Home</a>
+      <a href={getLocalizedPath(locale)} class="opacity-80">
+        {t(locale, "breadcrumb.home")}
+      </a>
       <span aria-hidden="true" class="opacity-80">&raquo;</span>
     </li>
     {
@@ -45,7 +71,10 @@ if (breadcrumbList[0] === "tags" && !isNaN(Number(breadcrumbList[2]))) {
           </li>
         ) : (
           <li>
-            <a href={`/${breadcrumb}/`} class="capitalize opacity-70">
+            <a
+              href={getLocalizedPath(locale, `/${breadcrumb}/`)}
+              class="capitalize opacity-70"
+            >
               {breadcrumb}
             </a>
             <span aria-hidden="true">&raquo;</span>

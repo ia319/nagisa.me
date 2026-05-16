@@ -2,10 +2,12 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import { PUBLIC_GOOGLE_SITE_VERIFICATION } from "astro:env/client";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/config";
 import { SITE } from "@/config";
 import "@/styles/global.css";
 
 type Props = {
+  locale?: Locale;
   title?: string;
   author?: string;
   profile?: string;
@@ -18,6 +20,7 @@ type Props = {
 };
 
 const {
+  locale = DEFAULT_LOCALE,
   title = SITE.title,
   author = SITE.author,
   profile = SITE.profile,
@@ -51,7 +54,7 @@ const structuredData = {
 <!doctype html>
 <html
   dir={SITE.dir}
-  lang=`${SITE.lang ?? "en"}`
+  lang={locale}
   class={`${scrollSmooth && "scroll-smooth"}`}
 >
   <head>
@@ -118,7 +121,7 @@ const structuredData = {
       rel="alternate"
       type="application/rss+xml"
       title={SITE.title}
-      href={new URL("rss.xml", Astro.site)}
+      href={new URL(`/${locale}/rss.xml`, Astro.site)}
     />
 
     <meta name="theme-color" content="" />
