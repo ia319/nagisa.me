@@ -41,6 +41,7 @@ const languageOptions = SUPPORTED_LOCALES.map(targetLocale => ({
           <a
             href={option.href}
             hreflang={option.locale}
+            data-locale-choice={option.locale}
             aria-current={option.isActive ? "true" : undefined}
             class:list={[
               "block px-3 py-2 text-sm whitespace-nowrap hover:text-accent",
@@ -60,3 +61,33 @@ const languageOptions = SUPPORTED_LOCALES.map(targetLocale => ({
     display: none;
   }
 </style>
+
+<script>
+  const storageKey = "preferredLocale";
+  const cookieName = "preferred_locale";
+  const oneYearInSeconds = 60 * 60 * 24 * 365;
+
+  function bindLanguagePreference() {
+    document
+      .querySelectorAll<HTMLAnchorElement>("[data-locale-choice]")
+      .forEach(link => {
+        if (link.dataset.localePreferenceBound === "true") return;
+
+        link.dataset.localePreferenceBound = "true";
+        link.addEventListener("click", () => {
+          const locale = link.dataset.localeChoice;
+          if (!locale) return;
+
+          try {
+            localStorage.setItem(storageKey, locale);
+          } catch {
+            // Continue with the cookie so routing still remembers the selection.
+          }
+          document.cookie = `${cookieName}=${locale}; Max-Age=${oneYearInSeconds}; Path=/; SameSite=Lax`;
+        });
+      });
+  }
+
+  bindLanguagePreference();
+  document.addEventListener("astro:after-swap", bindLanguagePreference);
+</script>
