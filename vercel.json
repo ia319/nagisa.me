@@ -1,0 +1,77 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "cookie",
+          "key": "preferred_locale",
+          "value": {
+            "eq": "en"
+          }
+        }
+      ],
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/en/"
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "cookie",
+          "key": "preferred_locale",
+          "value": {
+            "eq": "zh"
+          }
+        }
+      ],
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/zh/"
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept-language",
+          "value": "^[eE][nN]"
+        }
+      ],
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/en/"
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept-language",
+          "value": "^[zZ][hH]"
+        }
+      ],
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/zh/"
+    },
+    {
+      "src": "^/$",
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/zh/"
+    }
+  ]
+}
