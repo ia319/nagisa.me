@@ -41,7 +41,9 @@
         {
           "type": "header",
           "key": "accept-language",
-          "value": "^[eE][nN]"
+          "value": {
+            "re": "^[eE][nN]"
+          }
         }
       ],
       "headers": {
@@ -56,7 +58,9 @@
         {
           "type": "header",
           "key": "accept-language",
-          "value": "^[zZ][hH]"
+          "value": {
+            "re": "^[zZ][hH]"
+          }
         }
       ],
       "headers": {
