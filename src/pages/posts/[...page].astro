@@ -1,13 +1,9 @@
 ---
 import type { GetStaticPaths } from "astro";
-import { getCollection } from "astro:content";
-import getSortedPosts from "@/utils/getSortedPosts";
-import { SITE } from "@/config";
 
-export const getStaticPaths = (async ({ paginate }) => {
-  const posts = await getCollection("blog", ({ data }) => !data.draft);
-  return paginate(getSortedPosts(posts, "zh"), { pageSize: SITE.postPerPage });
-}) satisfies GetStaticPaths;
+export const getStaticPaths = (() => [
+  { params: { page: undefined } },
+]) satisfies GetStaticPaths;
 
 return Astro.redirect("/zh/posts/");
 ---

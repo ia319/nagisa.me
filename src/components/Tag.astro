@@ -10,12 +10,7 @@ type Props = {
   size?: "sm" | "lg";
 };
 
-const {
-  locale: propLocale,
-  tag,
-  tagName,
-  size = "lg",
-} = Astro.props;
+const { locale: propLocale, tag, tagName, size = "lg" } = Astro.props;
 const locale = propLocale ?? getLocaleFromPathname(Astro.url.pathname);
 ---
 
