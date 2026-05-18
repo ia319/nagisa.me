@@ -1,10 +1,6 @@
 ---
 import IconLanguage from "@/assets/icons/IconLanguage.svg";
-import {
-  LOCALE_LABELS,
-  SUPPORTED_LOCALES,
-  type Locale,
-} from "@/i18n/config";
+import { LOCALE_LABELS, SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
 import { switchLocaleInPath } from "@/i18n/routes";
 import { t } from "@/i18n/ui";
 
@@ -16,7 +12,8 @@ type Props = {
 const { links = {}, locale } = Astro.props;
 
 const languageOptions = SUPPORTED_LOCALES.map(targetLocale => ({
-  href: links[targetLocale] ?? switchLocaleInPath(Astro.url.pathname, targetLocale),
+  href:
+    links[targetLocale] ?? switchLocaleInPath(Astro.url.pathname, targetLocale),
   isActive: targetLocale === locale,
   label: LOCALE_LABELS[targetLocale],
   locale: targetLocale,
@@ -25,7 +22,7 @@ const languageOptions = SUPPORTED_LOCALES.map(targetLocale => ({
 
 <details class="group relative">
   <summary
-    class="focus-outline flex size-12 list-none items-center justify-center p-4 hover:[&>svg]:stroke-accent sm:size-8 sm:p-1"
+    class="focus-outline flex size-12 list-none items-center justify-center p-4 sm:size-8 sm:p-1 hover:[&>svg]:stroke-accent"
     aria-label={t(locale, "nav.language")}
     title={t(locale, "nav.language")}
   >

@@ -42,7 +42,9 @@ export function getRelativeBlogFilePath(filePath: string | undefined) {
 
   if (blogPathIndex < 0) return undefined;
 
-  return normalizedFilePath.slice(blogPathIndex + normalizedBlogPath.length + 1);
+  return normalizedFilePath.slice(
+    blogPathIndex + normalizedBlogPath.length + 1
+  );
 }
 
 function getSourceIdFromFilePath(filePath: string | undefined) {
@@ -56,7 +58,9 @@ export function getPostSourceId(postOrId: BlogPostReference | string) {
   return getSourceIdFromFilePath(postOrId.filePath) ?? postOrId.id;
 }
 
-export function getPostSource(postOrId: BlogPostReference | string): PostSource {
+export function getPostSource(
+  postOrId: BlogPostReference | string
+): PostSource {
   const sourceId = getPostSourceId(postOrId);
   const parsedPostId = parsePostId(sourceId);
   const baseIdSegments = parsedPostId.baseId.split("/").filter(Boolean);

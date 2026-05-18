@@ -1,8 +1,5 @@
 import type { Locale } from "@/i18n/config";
-import {
-  getPostLocale,
-  getPostSource,
-} from "./postI18n";
+import { getPostLocale, getPostSource } from "./postI18n";
 import { slugifyStr } from "./slugify";
 
 type GetPathOptions = {
@@ -24,8 +21,8 @@ export function getPostDirectorySegments(
   id: string,
   filePath: string | undefined
 ): PostDirectorySegment[] {
-  return getPostSource({ id, filePath }).directorySegments
-    .filter(segment => !segment.startsWith("_"))
+  return getPostSource({ id, filePath })
+    .directorySegments.filter(segment => !segment.startsWith("_"))
     .map(segment => ({ name: segment, slug: slugifyStr(segment) }));
 }
 
