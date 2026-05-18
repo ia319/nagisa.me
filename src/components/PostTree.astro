@@ -1,0 +1,157 @@
+---
+import { SITE } from "@/config";
+import type { Locale } from "@/i18n/config";
+import { t, type UIKey } from "@/i18n/ui";
+import type { PostTreeNode, PostTreeRoot } from "@/utils/postTree";
+import Card from "./Card.astro";
+
+type Props = {
+  locale: Locale;
+  node?: PostTreeNode;
+  tree?: PostTreeRoot;
+};
+
+const { locale, node, tree } = Astro.props;
+const current = node ?? tree;
+
+if (!current) {
+  throw new Error("PostTree requires either a tree or a node prop.");
+}
+
+const isRoot = !node;
+const { children, introPost, posts } = current;
+const { maxPostsPerDirectory, maxSubdirectoriesPerDirectory } = SITE.postsTree;
+
+const visiblePosts = posts.slice(0, maxPostsPerDirectory);
+const hiddenPosts = posts.slice(maxPostsPerDirectory);
+const visibleChildren = children.slice(0, maxSubdirectoriesPerDirectory);
+const hiddenChildren = children.slice(maxSubdirectoriesPerDirectory);
+const Heading = `h${Math.min((node?.depth ?? 0) + 2, 6)}` as
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6";
+const directoryName = node?.name ?? "";
+const postHeading = isRoot ? "h2" : "h3";
+const Container = isRoot ? "section" : "details";
+const isNestedDirectory = !isRoot && (node?.depth ?? 0) > 0;
+
+const formatCountText = (key: UIKey, count: number) =>
+  t(locale, key).replace("{count}", String(count));
+---
+
+<Container
+  open={isRoot ? undefined : true}
+  class:list={[
+    isRoot
+      ? "space-y-6"
+      : [
+          "post-tree-directory mt-8",
+          { "border-s ps-4": isNestedDirectory },
+        ],
+  ]}
+>
+  {
+    !isRoot && (
+      <summary class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+        <Heading class="min-w-0 text-xl font-semibold break-words text-foreground">
+          {directoryName}
+        </Heading>
+        <span class="min-w-16 justify-self-end pt-1 text-right text-sm font-medium text-accent underline-offset-4 hover:underline">
+          <span class="when-open">{t(locale, "posts.collapseDirectory")}</span>
+          <span class="when-closed">{t(locale, "posts.expandDirectory")}</span>
+        </span>
+      </summary>
+    )
+  }
+
+  {
+    (introPost || visiblePosts.length > 0) && (
+      <ul class:list={[{ "mt-2": !isRoot }]}>
+        {introPost && (
+          <Card locale={locale} variant={postHeading} {...introPost} />
+        )}
+        {visiblePosts.map(post => (
+          <Card locale={locale} variant={postHeading} {...post} />
+        ))}
+      </ul>
+    )
+  }
+
+  {
+    hiddenPosts.length > 0 && (
+      <details class="post-tree-disclosure mt-3">
+        <summary class="inline-flex text-sm font-medium text-accent underline-offset-4 hover:underline">
+          <span class="when-closed">
+            {formatCountText("posts.showMorePosts", hiddenPosts.length)}
+          </span>
+          <span class="when-open">{t(locale, "posts.showLessPosts")}</span>
+        </summary>
+        <ul class="mt-2">
+          {hiddenPosts.map(post => (
+            <Card locale={locale} variant={postHeading} {...post} />
+          ))}
+        </ul>
+      </details>
+    )
+  }
+
+  {
+    visibleChildren.length > 0 && (
+      <div class:list={[isRoot ? "space-y-8" : "mt-6 space-y-6"]}>
+        {visibleChildren.map(child => (
+          <Astro.self locale={locale} node={child} />
+        ))}
+      </div>
+    )
+  }
+
+  {
+    hiddenChildren.length > 0 && (
+      <details class="post-tree-disclosure mt-6">
+        <summary class="inline-flex text-sm font-medium text-accent underline-offset-4 hover:underline">
+          <span class="when-closed">
+            {formatCountText(
+              "posts.showMoreDirectories",
+              hiddenChildren.length
+            )}
+          </span>
+          <span class="when-open">
+            {t(locale, "posts.showLessDirectories")}
+          </span>
+        </summary>
+        <div class="mt-6 space-y-6">
+          {hiddenChildren.map(child => (
+            <Astro.self locale={locale} node={child} />
+          ))}
+        </div>
+      </details>
+    )
+  }
+</Container>
+
+<style>
+  .post-tree-directory > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .post-tree-directory > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .post-tree-directory[open] > summary .when-closed,
+  .post-tree-directory:not([open]) > summary .when-open {
+    display: none;
+  }
+
+  .post-tree-disclosure > summary {
+    cursor: pointer;
+  }
+
+  .post-tree-disclosure[open] .when-closed,
+  .post-tree-disclosure:not([open]) .when-open {
+    display: none;
+  }
+</style>
