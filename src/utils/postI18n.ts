@@ -55,7 +55,17 @@ function getSourceIdFromFilePath(filePath: string | undefined) {
 
 export function getPostSourceId(postOrId: BlogPostReference | string) {
   if (typeof postOrId === "string") return postOrId;
-  return getSourceIdFromFilePath(postOrId.filePath) ?? postOrId.id;
+
+  const sourceId = getSourceIdFromFilePath(postOrId.filePath);
+
+  if (!sourceId) {
+    throw new Error(
+      `Unable to resolve blog source path for post "${postOrId.id}". ` +
+        `Expected filePath to point inside ${BLOG_PATH}.`
+    );
+  }
+
+  return sourceId;
 }
 
 export function getPostSource(
