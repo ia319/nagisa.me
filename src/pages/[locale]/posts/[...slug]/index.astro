@@ -2,7 +2,7 @@
 import { type CollectionEntry, getCollection } from "astro:content";
 import PostDetails from "@/layouts/PostDetails.astro";
 import getSortedPosts from "@/utils/getSortedPosts";
-import { getPath } from "@/utils/getPath";
+import { getPostRoutePath } from "@/utils/getPath";
 import { getPostLocale } from "@/utils/postI18n";
 import type { Locale } from "@/i18n/config";
 
@@ -20,11 +20,7 @@ export async function getStaticPaths() {
     return {
       params: {
         locale,
-        slug: getPath(post.id, post.filePath, {
-          includeBase: false,
-          includeLocale: false,
-          locale,
-        }),
+        slug: getPostRoutePath(post.id, post.filePath),
       },
       props: { locale, post },
     };

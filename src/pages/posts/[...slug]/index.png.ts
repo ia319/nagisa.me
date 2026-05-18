@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { getCollection, type CollectionEntry } from "astro:content";
-import { getPath } from "@/utils/getPath";
+import { getPostRoutePath } from "@/utils/getPath";
 import { generateOgImageForPost } from "@/utils/generateOgImages";
 import { DEFAULT_LOCALE } from "@/i18n/config";
 import { getPostLocale } from "@/utils/postI18n";
@@ -22,11 +22,7 @@ export async function getStaticPaths() {
 
   return posts.map(post => ({
     params: {
-      slug: getPath(post.id, post.filePath, {
-        includeBase: false,
-        includeLocale: false,
-        locale: DEFAULT_LOCALE,
-      }),
+      slug: getPostRoutePath(post.id, post.filePath),
     },
     props: post,
   }));
