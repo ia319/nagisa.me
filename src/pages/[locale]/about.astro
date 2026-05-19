@@ -1,10 +1,13 @@
 ---
+import { getCollection } from "astro:content";
 import Layout from "@/layouts/Layout.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import Breadcrumb from "@/components/Breadcrumb.astro";
+import LocalizedPageContent from "@/components/LocalizedPageContent.astro";
 import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
 import { t } from "@/i18n/ui";
+import { findLocalizedPageContent } from "@/utils/pageContent";
 import { SITE } from "@/config";
 
 type Props = {
@@ -19,16 +22,35 @@ export function getStaticPaths() {
 }
 
 const { locale } = Astro.props;
-const title = t(locale, "about.title");
+const pageContents = await getCollection("pages");
+const aboutContent = findLocalizedPageContent(pageContents, "about", locale);
+const title = aboutContent?.data.title ?? t(locale, "about.title");
+const description = aboutContent?.data.description ?? SITE.desc;
 ---
 
-<Layout locale={locale} title={`${title} | ${SITE.title}`}>
+<Layout locale={locale} title={`${title} | ${SITE.title}`} {description}>
   <Header locale={locale} />
   <Breadcrumb locale={locale} />
   <main id="main-content" class="app-layout">
-    <section id="about" class="app-prose mb-28 max-w-app prose-img:border-0">
-      <h1 class="text-2xl tracking-wider sm:text-3xl">{title}</h1>
-    </section>
+    {
+      aboutContent ? (
+        <LocalizedPageContent
+          class="mb-28 prose-img:border-0"
+          contentId="about"
+          headingClass="not-prose text-2xl tracking-wider sm:text-3xl"
+          headingLevel="h1"
+          id="about"
+          locale={locale}
+        />
+      ) : (
+        <section
+          id="about"
+          class="app-prose mb-28 max-w-app prose-img:border-0"
+        >
+          <h1 class="text-2xl tracking-wider sm:text-3xl">{title}</h1>
+        </section>
+      )
+    }
   </main>
   <Footer locale={locale} />
 </Layout>
