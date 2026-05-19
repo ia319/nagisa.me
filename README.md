@@ -64,7 +64,7 @@ export const SUPPORTED_LOCALES = ["zh", "en"] as const;
 - Read page descriptions from the Markdown frontmatter `description` field.
 - Use About page frontmatter for page title, SEO description, and share metadata.
 - Support Markdown headings, body content, lists, and links in homepage intro content.
-- Remove the legacy root About Markdown entry.
+- Use localized About content instead of the legacy root About Markdown entry.
 
 ### Build Compatibility
 
