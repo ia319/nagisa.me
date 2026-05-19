@@ -1,14 +1,17 @@
 import type { CollectionEntry } from "astro:content";
 import { BLOG_PATH } from "@/content.config";
-import { DEFAULT_LOCALE, isLocale, type Locale } from "@/i18n/config";
+import { isLocale, type Locale } from "@/i18n/config";
+import {
+  getRelativeContentFilePath,
+  getSourceIdFromContentFilePath,
+  parseLocalizedSourceId,
+  type ParsedLocalizedSourceId,
+} from "./contentSource";
 
 type BlogPost = CollectionEntry<"blog">;
 export type BlogPostReference = Pick<BlogPost, "id" | "filePath">;
 
-type ParsedPostId = {
-  baseId: string;
-  locale: Locale;
-};
+type ParsedPostId = ParsedLocalizedSourceId;
 
 export type PostSource = ParsedPostId & {
   sourceId: string;
@@ -17,40 +20,15 @@ export type PostSource = ParsedPostId & {
 };
 
 export function parsePostId(id: string): ParsedPostId {
-  const pathSegments = id.split("/");
-  const filename = pathSegments.pop() ?? id;
-  const match = filename.match(/^(.*)\.([^.]+)$/);
-
-  if (!match || !isLocale(match[2])) {
-    return { baseId: id, locale: DEFAULT_LOCALE };
-  }
-
-  const baseFilename = match[1];
-  const baseId = [...pathSegments, baseFilename].filter(Boolean).join("/");
-  return { baseId, locale: match[2] };
+  return parseLocalizedSourceId(id);
 }
 
 export function getRelativeBlogFilePath(filePath: string | undefined) {
-  if (!filePath) return undefined;
-
-  const normalizedFilePath = filePath.replaceAll("\\", "/");
-  const normalizedBlogPath = BLOG_PATH.replaceAll("\\", "/").replace(
-    /^\.?\//,
-    ""
-  );
-  const blogPathIndex = normalizedFilePath.indexOf(`${normalizedBlogPath}/`);
-
-  if (blogPathIndex < 0) return undefined;
-
-  return normalizedFilePath.slice(
-    blogPathIndex + normalizedBlogPath.length + 1
-  );
+  return getRelativeContentFilePath(filePath, BLOG_PATH);
 }
 
 function getSourceIdFromFilePath(filePath: string | undefined) {
-  const relativeFilePath = getRelativeBlogFilePath(filePath);
-
-  return relativeFilePath?.replace(/\.[^/.]+$/, "");
+  return getSourceIdFromContentFilePath(filePath, BLOG_PATH);
 }
 
 export function getPostSourceId(postOrId: BlogPostReference | string) {
