@@ -4,4 +4,3 @@ description: A minimal, accessible and SEO-friendly blog built with Astro and Ta
 ---
 
 A minimal, accessible and SEO-friendly blog built with Astro and Tailwind CSS.
-
