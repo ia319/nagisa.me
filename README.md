@@ -52,6 +52,20 @@ export const DEFAULT_LOCALE = "zh";
 export const SUPPORTED_LOCALES = ["zh", "en"] as const;
 ```
 
+#### Localized Page Content
+
+- Store page-level Markdown content in `src/data/pages`.
+- Use `src/data/pages/home-intro.md` for homepage intro content.
+- Use `src/data/pages/about.md` for About page content.
+- Mark localized page content with filename suffixes such as `src/data/pages/home-intro.en.md` and `src/data/pages/about.en.md`.
+- Treat files without locale suffixes as `DEFAULT_LOCALE` content.
+- Fall back to default locale content when target locale content is missing.
+- Read page titles from the Markdown frontmatter `title` field.
+- Read page descriptions from the Markdown frontmatter `description` field.
+- Use About page frontmatter for page title, SEO description, and share metadata.
+- Support Markdown headings, body content, lists, and links in homepage intro content.
+- Use localized About content instead of the legacy root About Markdown entry.
+
 ### Build Compatibility
 
 - Copy Pagefind output with a cross-platform command to support Windows builds.
