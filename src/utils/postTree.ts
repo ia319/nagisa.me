@@ -1,15 +1,17 @@
 import type { CollectionEntry } from "astro:content";
-import type { Locale } from "@/i18n/config";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/config";
 import { getPostDirectorySegments, type PostDirectorySegment } from "./getPath";
 import getSortedPosts from "./getSortedPosts";
-import { getPostBaseId } from "./postI18n";
+import { getPostBaseId, getPostLocale } from "./postI18n";
 
 type BlogPost = CollectionEntry<"blog">;
+type LocaleFallbackMode = "none" | "default-locale";
 
 export type PostTreeConfig = Readonly<{
   maxSubdirectoriesPerDirectory: number;
   maxPostsPerDirectory: number;
   directoryIntroFileName: string;
+  directoryLabelFallback?: LocaleFallbackMode;
 }>;
 
 export type PostTreeNode = {
@@ -37,6 +39,8 @@ type MutablePostTreeNode = Omit<PostTreeNode, "children"> & {
   childrenBySlug: Map<string, MutablePostTreeNode>;
 };
 
+type DirectoryLabelIndex = Map<string, Map<Locale, string>>;
+
 function createRootNode(): MutablePostTreeRoot {
   return {
     posts: [],
@@ -47,10 +51,11 @@ function createRootNode(): MutablePostTreeRoot {
 
 function createTreeNode(
   segment: PostDirectorySegment,
+  name: string,
   depth: number
 ): MutablePostTreeNode {
   return {
-    name: segment.name,
+    name,
     slug: segment.slug,
     depth,
     posts: [],
@@ -61,11 +66,16 @@ function createTreeNode(
 
 function getOrCreateNode(
   root: MutablePostTreeRoot,
-  segments: PostDirectorySegment[]
+  segments: PostDirectorySegment[],
+  locale: Locale,
+  config: PostTreeConfig,
+  directoryLabelIndex: DirectoryLabelIndex
 ) {
   let current: MutablePostTreeRoot | MutablePostTreeNode = root;
+  const currentSegments: PostDirectorySegment[] = [];
 
   for (const [depth, segment] of segments.entries()) {
+    currentSegments.push(segment);
     const existingNode: MutablePostTreeNode | undefined =
       current.childrenBySlug.get(segment.slug);
 
@@ -74,7 +84,15 @@ function getOrCreateNode(
       continue;
     }
 
-    const node = createTreeNode(segment, depth);
+    const directoryKey = getDirectoryKey(currentSegments);
+    const name = getDirectoryLabel(
+      directoryKey,
+      segment,
+      locale,
+      config,
+      directoryLabelIndex
+    );
+    const node = createTreeNode(segment, name, depth);
     current.childrenBySlug.set(segment.slug, node);
     current.children.push(node);
     current = node;
@@ -92,6 +110,57 @@ function isDirectoryIntroPost(post: BlogPost, config: PostTreeConfig) {
     getPostBaseFileName(post).toLowerCase() ===
     config.directoryIntroFileName.toLowerCase()
   );
+}
+
+function getDirectoryKey(segments: PostDirectorySegment[]) {
+  return segments.map(segment => segment.slug).join("/");
+}
+
+function createDirectoryLabelIndex(
+  posts: BlogPost[],
+  config: PostTreeConfig
+): DirectoryLabelIndex {
+  const labelsByDirectory: DirectoryLabelIndex = new Map();
+
+  for (const post of getSortedPosts(posts)) {
+    if (!isDirectoryIntroPost(post, config)) continue;
+
+    const directorySegments = getPostDirectorySegments(post.id, post.filePath);
+    const directoryKey = getDirectoryKey(directorySegments);
+    const locale = getPostLocale(post);
+    const labelsByLocale =
+      labelsByDirectory.get(directoryKey) ?? new Map<Locale, string>();
+
+    if (!labelsByLocale.has(locale)) {
+      labelsByLocale.set(locale, post.data.title);
+    }
+
+    labelsByDirectory.set(directoryKey, labelsByLocale);
+  }
+
+  return labelsByDirectory;
+}
+
+function getDirectoryLabel(
+  directoryKey: string,
+  segment: PostDirectorySegment,
+  locale: Locale,
+  config: PostTreeConfig,
+  directoryLabelIndex: DirectoryLabelIndex
+) {
+  const labelsByLocale = directoryLabelIndex.get(directoryKey);
+  const currentLocaleLabel = labelsByLocale?.get(locale);
+
+  if (currentLocaleLabel) return currentLocaleLabel;
+
+  const fallbackMode = config.directoryLabelFallback ?? "default-locale";
+
+  if (fallbackMode === "default-locale") {
+    const defaultLocaleLabel = labelsByLocale?.get(DEFAULT_LOCALE);
+    if (defaultLocaleLabel) return defaultLocaleLabel;
+  }
+
+  return segment.name;
 }
 
 function sortChildren(
@@ -131,6 +200,7 @@ export function buildPostTree(
 ): PostTreeRoot {
   const root = createRootNode();
   const sortedPosts = getSortedPosts(posts, locale);
+  const directoryLabelIndex = createDirectoryLabelIndex(posts, config);
   const collator = new Intl.Collator(locale, {
     numeric: true,
     sensitivity: "base",
@@ -138,7 +208,13 @@ export function buildPostTree(
 
   for (const post of sortedPosts) {
     const directorySegments = getPostDirectorySegments(post.id, post.filePath);
-    const targetNode = getOrCreateNode(root, directorySegments);
+    const targetNode = getOrCreateNode(
+      root,
+      directorySegments,
+      locale,
+      config,
+      directoryLabelIndex
+    );
 
     if (isDirectoryIntroPost(post, config)) {
       if (!targetNode.introPost) {
