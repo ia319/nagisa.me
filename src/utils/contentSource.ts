@@ -1,3 +1,4 @@
+import path from "node:path";
 import { DEFAULT_LOCALE, isLocale, type Locale } from "@/i18n/config";
 
 export type ParsedLocalizedSourceId = {
@@ -27,19 +28,20 @@ export function getRelativeContentFilePath(
 ) {
   if (!filePath) return undefined;
 
-  const normalizedFilePath = filePath.replaceAll("\\", "/");
-  const normalizedContentPath = contentPath
-    .replaceAll("\\", "/")
-    .replace(/^\.?\//, "");
-  const contentPathIndex = normalizedFilePath.indexOf(
-    `${normalizedContentPath}/`
+  const relativeFilePath = path.relative(
+    path.resolve(contentPath),
+    path.resolve(filePath)
   );
 
-  if (contentPathIndex < 0) return undefined;
+  if (
+    !relativeFilePath ||
+    relativeFilePath.startsWith("..") ||
+    path.isAbsolute(relativeFilePath)
+  ) {
+    return undefined;
+  }
 
-  return normalizedFilePath.slice(
-    contentPathIndex + normalizedContentPath.length + 1
-  );
+  return relativeFilePath.replaceAll(path.sep, "/");
 }
 
 export function getSourceIdFromContentFilePath(
