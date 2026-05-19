@@ -12,6 +12,7 @@ export type PostTreeConfig = Readonly<{
   maxPostsPerDirectory: number;
   directoryIntroFileName: string;
   directoryLabelFallback?: LocaleFallbackMode;
+  postLocaleFallback?: LocaleFallbackMode;
 }>;
 
 export type PostTreeNode = {
@@ -163,6 +164,26 @@ function getDirectoryLabel(
   return segment.name;
 }
 
+function getTreePosts(
+  posts: BlogPost[],
+  locale: Locale,
+  config: PostTreeConfig
+) {
+  const localePosts = getSortedPosts(posts, locale);
+  const fallbackMode = config.postLocaleFallback ?? "none";
+
+  if (fallbackMode !== "default-locale" || locale === DEFAULT_LOCALE) {
+    return localePosts;
+  }
+
+  const localeBaseIds = new Set(localePosts.map(getPostBaseId));
+  const fallbackPosts = getSortedPosts(posts, DEFAULT_LOCALE).filter(
+    post => !localeBaseIds.has(getPostBaseId(post))
+  );
+
+  return getSortedPosts([...localePosts, ...fallbackPosts]);
+}
+
 function sortChildren(
   node: MutablePostTreeRoot | MutablePostTreeNode,
   collator: Intl.Collator
@@ -199,7 +220,7 @@ export function buildPostTree(
   config: PostTreeConfig
 ): PostTreeRoot {
   const root = createRootNode();
-  const sortedPosts = getSortedPosts(posts, locale);
+  const sortedPosts = getTreePosts(posts, locale, config);
   const directoryLabelIndex = createDirectoryLabelIndex(posts, config);
   const collator = new Intl.Collator(locale, {
     numeric: true,

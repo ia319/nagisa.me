@@ -3,6 +3,7 @@ import { SITE } from "@/config";
 import type { Locale } from "@/i18n/config";
 import { t, type UIKey } from "@/i18n/ui";
 import type { PostTreeNode, PostTreeRoot } from "@/utils/postTree";
+import { getPostLocale } from "@/utils/postI18n";
 import Card from "./Card.astro";
 
 type Props = {
@@ -67,10 +68,14 @@ const formatCountText = (key: UIKey, count: number) =>
     (introPost || visiblePosts.length > 0) && (
       <ul class:list={[{ "mt-2": !isRoot }]}>
         {introPost && (
-          <Card locale={locale} variant={postHeading} {...introPost} />
+          <Card
+            locale={getPostLocale(introPost)}
+            variant={postHeading}
+            {...introPost}
+          />
         )}
         {visiblePosts.map(post => (
-          <Card locale={locale} variant={postHeading} {...post} />
+          <Card locale={getPostLocale(post)} variant={postHeading} {...post} />
         ))}
       </ul>
     )
@@ -87,7 +92,11 @@ const formatCountText = (key: UIKey, count: number) =>
         </summary>
         <ul class="mt-2">
           {hiddenPosts.map(post => (
-            <Card locale={locale} variant={postHeading} {...post} />
+            <Card
+              locale={getPostLocale(post)}
+              variant={postHeading}
+              {...post}
+            />
           ))}
         </ul>
       </details>

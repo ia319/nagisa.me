@@ -13,6 +13,7 @@ export const SITE = {
     maxPostsPerDirectory: 4,
     directoryIntroFileName: "README",
     directoryLabelFallback: "default-locale",
+    postLocaleFallback: "none",
   },
   scheduledPostMargin: 15 * 60 * 1000, // 15 minutes
   showArchives: true,
