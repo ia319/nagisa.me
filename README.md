@@ -1,3 +1,8 @@
+## Branches
+
+- `main`: blog content branch.
+- `dev`: feature development branch without blog content.
+
 Astro site starter.
 
 ## Feature Changes
