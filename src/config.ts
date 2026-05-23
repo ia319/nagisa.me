@@ -5,6 +5,7 @@ export const SITE = {
   desc: "A minimal, responsive and SEO-friendly blog.",
   title: "Blog",
   ogImage: "",
+  repository: "",
   lightAndDarkMode: true,
   postPerIndex: 4,
   postPerPage: 4,
