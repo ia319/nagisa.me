@@ -6,6 +6,9 @@ export const SITE = {
   title: "Blog",
   ogImage: "",
   repository: "",
+  contentGitMeta: {
+    enabled: false,
+  },
   lightAndDarkMode: true,
   postPerIndex: 4,
   postPerPage: 4,
