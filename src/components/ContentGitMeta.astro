@@ -1,0 +1,110 @@
+---
+import dayjs from "dayjs";
+import timezone from "dayjs/plugin/timezone";
+import utc from "dayjs/plugin/utc";
+import { SITE } from "@/config";
+import type { Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import type { ContentGitCommit } from "@/utils/contentGitMeta";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+type Props = {
+  class?: string;
+  filePath?: string;
+  locale: Locale;
+  timezone?: string;
+};
+
+type MetaRow = {
+  commit?: ContentGitCommit;
+  label: string;
+};
+
+const {
+  class: className = "",
+  filePath,
+  locale,
+  timezone: contentTimezone,
+} = Astro.props;
+const meta = SITE.contentGitMeta.enabled
+  ? (await import("@/utils/contentGitMeta")).getContentGitMeta(filePath)
+  : undefined;
+const showEdited =
+  meta?.lastCommitted &&
+  ((meta.firstCommitted &&
+    meta.lastCommitted.hash !== meta.firstCommitted.hash) ||
+    (!meta.firstCommitted && meta.visibleCommitCount > 1));
+
+const rows: MetaRow[] = [
+  {
+    commit: meta?.firstCommitted,
+    label: t(locale, "contentMeta.firstCommitted"),
+  },
+  ...(showEdited
+    ? [
+        {
+          commit: meta?.lastCommitted,
+          label: t(locale, "contentMeta.edited"),
+        },
+      ]
+    : []),
+];
+
+function formatCommitDate(commit: ContentGitCommit) {
+  return dayjs(commit.isoDate)
+    .tz(contentTimezone || SITE.timezone)
+    .format("YYYY-MM-DD HH:mm");
+}
+
+function getCommitLabel(commit: ContentGitCommit) {
+  return `${t(locale, "contentMeta.commitLabel")} ${commit.hash}`;
+}
+---
+
+{
+  SITE.contentGitMeta.enabled && (
+    <aside
+      class:list={["not-prose mt-8 flex max-w-full justify-end", className]}
+      data-pagefind-ignore
+    >
+      <div class="max-w-full text-end text-xs leading-6 text-foreground/65 sm:text-sm">
+        {rows.map(row => (
+          <p class="m-0 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5">
+            <span>{row.label}</span>
+            {row.commit ? (
+              <>
+                <time datetime={row.commit.isoDate}>
+                  {formatCommitDate(row.commit)}
+                </time>
+                <span aria-hidden="true">·</span>
+                {row.commit.url ? (
+                  <a
+                    aria-label={getCommitLabel(row.commit)}
+                    class="font-medium text-foreground/80 underline decoration-dashed underline-offset-4 hover:text-accent"
+                    href={row.commit.url}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                    title={getCommitLabel(row.commit)}
+                  >
+                    {row.commit.shortHash}
+                  </a>
+                ) : (
+                  <span
+                    class="font-medium text-foreground/80"
+                    title={getCommitLabel(row.commit)}
+                  >
+                    {row.commit.shortHash}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span>{t(locale, "contentMeta.unknown")}</span>
+            )}
+          </p>
+        ))}
+      </div>
+    </aside>
+  )
+}
