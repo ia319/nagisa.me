@@ -1,5 +1,6 @@
 ---
 import { getCollection, render } from "astro:content";
+import ContentGitMeta from "@/components/ContentGitMeta.astro";
 import type { Locale } from "@/i18n/config";
 import { findLocalizedPageContent } from "@/utils/pageContent";
 
@@ -33,6 +34,7 @@ const Content = pageContent ? (await render(pageContent)).Content : undefined;
     <div id={id} class:list={["app-prose max-w-app", className]}>
       <Heading class={headingClass}>{pageContent.data.title}</Heading>
       <Content />
+      <ContentGitMeta filePath={pageContent.filePath} {locale} />
     </div>
   )
 }

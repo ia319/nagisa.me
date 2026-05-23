@@ -11,8 +11,9 @@ Review the following feature changes from the upstream project:
 
 ### Post Directory Tree
 
+Post directory tree renders blog posts by their source directory structure and keeps localized directory labels aligned with available intro content.
+
 - Read nested directory structures under `src/data/blog`.
-- Render posts by directory hierarchy instead of a flat post list.
 - Pin `README.md` as the directory intro post.
 - Resolve directory labels from the current locale intro title, then the default locale intro title, then the folder name.
 - Treat files without locale suffixes as `DEFAULT_LOCALE` posts and intro posts.
@@ -40,8 +41,9 @@ export const SITE = {
 
 ### Language Routing And Switching
 
+Language routing and switching renders locale-prefixed pages, detects post locales from source filenames, and provides language navigation across available translations.
+
 - Use `/zh/` and `/en/` as language page prefixes.
-- Detect post locale from the blog filename suffix, and treat files without locale suffixes as `DEFAULT_LOCALE` posts.
 - Provide a language switcher in the header with the existing icon component system.
 - Generate language links from available post translations on post detail pages, and fall back to the target locale post list when a translation is missing.
 - Route the root path `/` on Vercel by `preferred_locale` cookie, browser `Accept-Language`, then default locale order.
@@ -59,18 +61,45 @@ export const SUPPORTED_LOCALES = ["zh", "en"] as const;
 
 #### Localized Page Content
 
+Localized page content renders page-level Markdown from `src/data/pages` with locale-aware lookup and default-locale fallback.
+
 - Store page-level Markdown content in `src/data/pages`.
 - Use `src/data/pages/home-intro.md` for homepage intro content.
 - Use `src/data/pages/about.md` for About page content.
 - Mark localized page content with filename suffixes such as `src/data/pages/home-intro.en.md` and `src/data/pages/about.en.md`.
 - Treat files without locale suffixes as `DEFAULT_LOCALE` content.
-- Fall back to default locale content when target locale content is missing.
 - Read page titles from the Markdown frontmatter `title` field.
 - Read page descriptions from the Markdown frontmatter `description` field.
 - Use About page frontmatter for page title, SEO description, and share metadata.
 - Support Markdown headings, body content, lists, and links in homepage intro content.
 - Use localized About content instead of the legacy root About Markdown entry.
 
+### Content Git Metadata
+
+Content Git metadata displays Git-based provenance after Markdown content, including the first committed time, the edited time, and the related commit hash.
+
+- Render metadata after blog post content and localized page content.
+- Show the first committed time for each Markdown file.
+- Show the edited time only when the latest content commit differs from the first content commit.
+- Link rendered hashes to repository commits when `SITE.repository` is set.
+- Show `Unknown` when Git history is unavailable or shallow history prevents reliable first-commit detection.
+- Normalize repository URLs without a protocol to `https://`.
+- Accept SHA-1 and SHA-256 commit hashes.
+- Skip Git history lookup when `SITE.contentGitMeta.enabled` is `false`.
+
+Use the default config in `src/config.ts`:
+
+```ts
+export const SITE = {
+  repository: "", // repository root URL, e.g. "https://github.com/owner/repo"
+  contentGitMeta: {
+    enabled: false, // true | false
+  },
+};
+```
+
 ### Build Compatibility
+
+Build compatibility keeps generated search assets portable across local and Windows builds.
 
 - Copy Pagefind output with a cross-platform command to support Windows builds.
