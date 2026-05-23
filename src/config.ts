@@ -5,9 +5,9 @@ export const SITE = {
   desc: "A minimal, responsive and SEO-friendly blog.",
   title: "Blog",
   ogImage: "",
-  repository: "",
+  repository: "https://github.com/ia319/nagisa.me",
   contentGitMeta: {
-    enabled: false,
+    enabled: true,
   },
   lightAndDarkMode: true,
   postPerIndex: 4,
