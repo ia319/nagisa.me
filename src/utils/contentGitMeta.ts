@@ -21,6 +21,8 @@ const UNKNOWN_META: ContentGitMeta = {
   visibleCommitCount: 0,
 };
 
+const GIT_HASH_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
 const metaCache = new Map<string, ContentGitMeta>();
 let gitStateCache: { isShallow: boolean; repoRoot: string } | undefined;
 
@@ -68,7 +70,7 @@ function getGitState() {
 function parseCommitLine(line: string): ContentGitCommit | undefined {
   const [hash, isoDate] = line.split("\t");
 
-  if (!hash || !isoDate || !/^[0-9a-f]{40}$/i.test(hash)) return undefined;
+  if (!hash || !isoDate || !GIT_HASH_PATTERN.test(hash)) return undefined;
   if (Number.isNaN(new Date(isoDate).getTime())) return undefined;
 
   return {
