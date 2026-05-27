@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "entries": {
+    "src/data/pages/about.en.md": {
+      "commitCount": 2,
+      "firstCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      },
+      "lastCommitted": {
+        "hash": "ecd9ad0775a9c33f20225410906c225dfe9bf088",
+        "isoDate": "2026-05-20T02:36:39+08:00"
+      }
+    },
+    "src/data/pages/about.md": {
+      "commitCount": 1,
+      "firstCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      },
+      "lastCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      }
+    },
+    "src/data/pages/home-intro.en.md": {
+      "commitCount": 1,
+      "firstCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      },
+      "lastCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      }
+    },
+    "src/data/pages/home-intro.md": {
+      "commitCount": 1,
+      "firstCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      },
+      "lastCommitted": {
+        "hash": "6e65f08dd8a99fdc73ad9b8eda909449e17c7d12",
+        "isoDate": "2026-05-20T02:23:34+08:00"
+      }
+    }
+  }
+}

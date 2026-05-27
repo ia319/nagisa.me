@@ -25,7 +25,7 @@ Post directory tree renders blog posts by their source directory structure and k
 - Resolve post locale and route from the blog-relative source path.
 - Generate post links as root-absolute paths to avoid duplicate locale prefixes in nested routes.
 
-Use the default config in `src/config.ts`:
+Default config in `src/config.ts`:
 
 ```ts
 export const SITE = {
@@ -51,7 +51,7 @@ Language routing and switching renders locale-prefixed pages, detects post local
 - Store the `preferred_locale` cookie after language selection.
 - Render the default locale homepage at `/` in local and non-Vercel environments.
 
-Use the language config in `src/i18n/config.ts`:
+Language config in `src/i18n/config.ts`:
 
 ```ts
 export const DEFAULT_LOCALE = "zh";
@@ -76,24 +76,36 @@ Localized page content renders page-level Markdown from `src/data/pages` with lo
 
 ### Content Git Metadata
 
-Content Git metadata displays Git-based provenance after Markdown content, including the first committed time, the edited time, and the related commit hash.
+Content Git metadata displays Git-based provenance after Markdown content, including the first committed time, the edited time, and the related commit hash. Build output reads a committed manifest instead of executing Git commands during Vercel builds.
 
 - Render metadata after blog post content and localized page content.
 - Show the first committed time for each Markdown file.
 - Show the edited time only when the latest content commit differs from the first content commit.
 - Link rendered hashes to repository commits when `SITE.repository` is set.
-- Show `Unknown` when Git history is unavailable or shallow history prevents reliable first-commit detection.
+- Show `Unknown` when the manifest has no reliable entry for the content file.
 - Normalize repository URLs without a protocol to `https://`.
 - Accept SHA-1 and SHA-256 commit hashes.
-- Skip Git history lookup when `SITE.contentGitMeta.enabled` is `false`.
+- Read only relative content paths from `src/generated/contentGitMetaManifest.json`.
+- Skip manifest loading when `SITE.contentGitMeta.enabled` is `false`.
 
-Use the default config in `src/config.ts`:
+#### Usage
+
+1. Commit content changes.
+2. Run the manifest generator in a full local Git clone.
+
+```sh
+pnpm content:git-meta
+```
+
+3. Commit `src/generated/contentGitMetaManifest.json` separately.
+
+Default config in `src/config.ts`:
 
 ```ts
 export const SITE = {
   repository: "", // repository root URL, e.g. "https://github.com/owner/repo"
   contentGitMeta: {
-    enabled: false, // true | false
+    enabled: false, // show content Git metadata from src/generated/contentGitMetaManifest.json
   },
 };
 ```
