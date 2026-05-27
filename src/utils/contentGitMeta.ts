@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { SITE } from "@/config";
+import contentGitMetaManifest from "@/generated/contentGitMetaManifest.json";
 
 export type ContentGitCommit = {
   hash: string;
@@ -16,6 +16,22 @@ export type ContentGitMeta = {
   visibleCommitCount: number;
 };
 
+type ManifestCommit = {
+  hash?: string;
+  isoDate?: string;
+};
+
+type ManifestEntry = {
+  commitCount?: number;
+  firstCommitted?: ManifestCommit;
+  lastCommitted?: ManifestCommit;
+};
+
+type ContentGitMetaManifest = {
+  entries?: Record<string, ManifestEntry>;
+  version?: number;
+};
+
 const UNKNOWN_META: ContentGitMeta = {
   isShallow: false,
   visibleCommitCount: 0,
@@ -24,64 +40,30 @@ const UNKNOWN_META: ContentGitMeta = {
 const GIT_HASH_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 
 const metaCache = new Map<string, ContentGitMeta>();
-let gitStateCache: { isShallow: boolean; repoRoot: string } | undefined;
+const manifest = contentGitMetaManifest as ContentGitMetaManifest;
 
 function normalizeGitPath(filePath: string) {
-  return filePath.replaceAll(path.sep, "/");
+  return filePath.replaceAll("\\", "/").replaceAll(path.sep, "/");
+}
+
+function getRepositoryUrl() {
+  const repository = SITE.repository.trim().replace(/\/+$/, "");
+
+  if (!repository) return undefined;
+  if (/^https?:\/\//i.test(repository)) return repository;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(repository)) return undefined;
+
+  return `https://${repository.replace(/^\/+/, "")}`;
 }
 
 function getCommitUrl(hash: string) {
-  const repository = SITE.repository.trim().replace(/\/$/, "");
+  const repositoryUrl = getRepositoryUrl();
 
-  if (!repository) return undefined;
-
-  const repositoryUrl = /^https?:\/\//i.test(repository)
-    ? repository
-    : `https://${repository}`;
-
-  return `${repositoryUrl}/commit/${hash}`;
+  return repositoryUrl ? `${repositoryUrl}/commit/${hash}` : undefined;
 }
 
-function getSafeDirectoryArg(repoRoot: string) {
-  return `safe.directory=${normalizeGitPath(repoRoot)}`;
-}
-
-function runGit(args: string[], repoRoot = process.cwd()) {
-  return execFileSync("git", ["-c", getSafeDirectoryArg(repoRoot), ...args], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-}
-
-function getGitState() {
-  if (gitStateCache) return gitStateCache;
-
-  const initialRoot = process.cwd();
-  const repoRoot = runGit(["rev-parse", "--show-toplevel"], initialRoot);
-  const isShallow =
-    runGit(["rev-parse", "--is-shallow-repository"], repoRoot) === "true";
-
-  gitStateCache = { isShallow, repoRoot };
-
-  return gitStateCache;
-}
-
-function parseCommitLine(line: string): ContentGitCommit | undefined {
-  const [hash, isoDate] = line.split("\t");
-
-  if (!hash || !isoDate || !GIT_HASH_PATTERN.test(hash)) return undefined;
-  if (Number.isNaN(new Date(isoDate).getTime())) return undefined;
-
-  return {
-    hash,
-    isoDate,
-    shortHash: hash.slice(0, 7),
-    url: getCommitUrl(hash),
-  };
-}
-
-function getRelativeRepoPath(filePath: string, repoRoot: string) {
+function getRelativeRepoPath(filePath: string) {
+  const repoRoot = process.cwd();
   const absolutePath = path.isAbsolute(filePath)
     ? filePath
     : path.resolve(repoRoot, filePath);
@@ -98,6 +80,41 @@ function getRelativeRepoPath(filePath: string, repoRoot: string) {
   return normalizeGitPath(relativePath);
 }
 
+function normalizeCommit(commit: ManifestCommit | undefined) {
+  if (!commit?.hash || !commit.isoDate) return undefined;
+  if (!GIT_HASH_PATTERN.test(commit.hash)) return undefined;
+  if (Number.isNaN(new Date(commit.isoDate).getTime())) return undefined;
+
+  return {
+    hash: commit.hash,
+    isoDate: commit.isoDate,
+    shortHash: commit.hash.slice(0, 7),
+    url: getCommitUrl(commit.hash),
+  };
+}
+
+function countVisibleCommits(
+  entry: ManifestEntry,
+  firstCommitted: ContentGitCommit | undefined,
+  lastCommitted: ContentGitCommit | undefined
+) {
+  const { commitCount } = entry;
+
+  if (
+    typeof commitCount === "number" &&
+    Number.isInteger(commitCount) &&
+    commitCount >= 0
+  ) {
+    return commitCount;
+  }
+
+  if (firstCommitted && lastCommitted) {
+    return firstCommitted.hash === lastCommitted.hash ? 1 : 2;
+  }
+
+  return firstCommitted || lastCommitted ? 1 : 0;
+}
+
 export function getContentGitMeta(
   filePath: string | undefined
 ): ContentGitMeta {
@@ -107,27 +124,26 @@ export function getContentGitMeta(
   if (cachedMeta) return cachedMeta;
 
   try {
-    const { isShallow, repoRoot } = getGitState();
-    const relativePath = getRelativeRepoPath(filePath, repoRoot);
+    const relativePath = getRelativeRepoPath(filePath);
 
     if (!relativePath) return UNKNOWN_META;
 
-    const output = runGit(
-      ["log", "--follow", "--format=%H%x09%cI", "--", relativePath],
-      repoRoot
-    );
-    const commits = output
-      .split(/\r?\n/)
-      .map(parseCommitLine)
-      .filter(commit => commit !== undefined);
-    const lastCommitted = commits[0];
-    const firstCommitted = isShallow ? undefined : commits[commits.length - 1];
+    const entry = manifest.entries?.[relativePath];
+
+    if (!entry) return UNKNOWN_META;
+
+    const firstCommitted = normalizeCommit(entry.firstCommitted);
+    const lastCommitted = normalizeCommit(entry.lastCommitted);
 
     const meta = {
       firstCommitted,
-      isShallow,
+      isShallow: false,
       lastCommitted,
-      visibleCommitCount: commits.length,
+      visibleCommitCount: countVisibleCommits(
+        entry,
+        firstCommitted,
+        lastCommitted
+      ),
     };
 
     metaCache.set(filePath, meta);
