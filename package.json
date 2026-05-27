@@ -6,6 +6,7 @@
     "dev": "astro dev",
     "build": "astro check && astro build && pagefind --site dist && node -e \"const fs=require('node:fs');fs.cpSync('dist/pagefind','public/pagefind',{recursive:true,force:true});\"",
     "preview": "astro preview",
+    "content:git-meta": "node scripts/generate-content-git-meta.mjs",
     "sync": "astro sync",
     "astro": "astro",
     "format:check": "prettier --check .",
