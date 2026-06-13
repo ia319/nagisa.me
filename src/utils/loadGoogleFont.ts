@@ -1,3 +1,15 @@
+const FONT_LOAD_ERROR_PREFIX = "Font load failed:";
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function isFontLoadError(error: unknown) {
+  return (
+    error instanceof Error && error.message.startsWith(FONT_LOAD_ERROR_PREFIX)
+  );
+}
+
 async function loadGoogleFont(
   font: string,
   text: string,
@@ -5,28 +17,40 @@ async function loadGoogleFont(
 ): Promise<ArrayBuffer> {
   const API = `https://fonts.googleapis.com/css2?family=${font}:wght@${weight}&text=${encodeURIComponent(text)}`;
 
-  const css = await (
-    await fetch(API, {
+  try {
+    const cssResponse = await fetch(API, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; de-at) AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1",
       },
-    })
-  ).text();
+    });
 
-  const resource = css.match(
-    /src: url\((.+?)\) format\('(opentype|truetype)'\)/
-  );
+    if (!cssResponse.ok) {
+      throw new Error(`CSS request returned ${cssResponse.status}`);
+    }
 
-  if (!resource) throw new Error("Failed to download dynamic font");
+    const css = await cssResponse.text();
 
-  const res = await fetch(resource[1]);
+    const resource = css.match(
+      /src: url\((.+?)\) format\('(opentype|truetype)'\)/
+    );
 
-  if (!res.ok) {
-    throw new Error("Failed to download dynamic font. Status: " + res.status);
+    if (!resource) {
+      throw new Error("CSS response did not include a supported font URL");
+    }
+
+    const res = await fetch(resource[1]);
+
+    if (!res.ok) {
+      throw new Error(`Font request returned ${res.status}`);
+    }
+
+    return res.arrayBuffer();
+  } catch (error) {
+    throw new Error(
+      `${FONT_LOAD_ERROR_PREFIX} ${font} ${weight}. ${getErrorMessage(error)}`
+    );
   }
-
-  return res.arrayBuffer();
 }
 
 async function loadGoogleFonts(

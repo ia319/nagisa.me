@@ -111,6 +111,15 @@ export const SITE = {
 };
 ```
 
+## Maintenance Changes
+
+### OG Image Font Fallback
+
+- Remote fonts as the default source.
+- Single `[og-image]` warning on font loading failure.
+- Fallback OG image without remote fonts.
+- Build failure for non-font OG image errors.
+
 ### Build Compatibility
 
 Build compatibility keeps generated search assets portable across local and Windows builds.
