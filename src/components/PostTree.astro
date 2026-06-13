@@ -21,7 +21,11 @@ if (!current) {
 
 const isRoot = !node;
 const { children, introPost, posts } = current;
-const { maxPostsPerDirectory, maxSubdirectoriesPerDirectory } = SITE.postsTree;
+const {
+  directoryDefaultOpen = true,
+  maxPostsPerDirectory,
+  maxSubdirectoriesPerDirectory,
+} = SITE.postsTree;
 
 const visiblePosts = posts.slice(0, maxPostsPerDirectory);
 const hiddenPosts = posts.slice(maxPostsPerDirectory);
@@ -43,7 +47,7 @@ const formatCountText = (key: UIKey, count: number) =>
 ---
 
 <Container
-  open={isRoot ? undefined : true}
+  open={isRoot || !directoryDefaultOpen ? undefined : true}
   class:list={[
     isRoot
       ? "space-y-6"

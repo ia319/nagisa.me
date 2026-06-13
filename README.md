@@ -35,6 +35,7 @@ export const SITE = {
     directoryIntroFileName: "README",
     directoryLabelFallback: "default-locale", // "default-locale" | "none"
     postLocaleFallback: "none", // "none" | "default-locale"
+    directoryDefaultOpen: true, // default open state for directory details
   },
 };
 ```
