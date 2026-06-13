@@ -43,7 +43,7 @@ function wrapText(value: string, maxChars: number, maxLines: number) {
 
     const slice = remaining.slice(0, maxChars);
     const lastSpaceIndex = slice.lastIndexOf(" ");
-    const breakIndex = lastSpaceIndex > 0 ? lastSpaceIndex : maxChars - 1;
+    const breakIndex = lastSpaceIndex > 0 ? lastSpaceIndex : maxChars;
     const line = remaining.slice(0, breakIndex).trim();
     lines.push(line);
     remaining = remaining.slice(breakIndex).trim();
@@ -133,13 +133,21 @@ export async function generateOgImageForPost(post: CollectionEntry<"blog">) {
   return svgBufferToPngBuffer(svg);
 }
 
+function getFallbackSiteFooter() {
+  try {
+    return new URL(SITE.website).hostname;
+  } catch {
+    return SITE.title;
+  }
+}
+
 export async function generateOgImageForSite() {
   const svg = await renderOgSvg(
     () => siteOgImage(),
     createFallbackOgSvg({
       title: SITE.title,
       description: SITE.desc,
-      footer: new URL(SITE.website).hostname,
+      footer: getFallbackSiteFooter(),
     })
   );
   return svgBufferToPngBuffer(svg);
