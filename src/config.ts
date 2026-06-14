@@ -18,6 +18,7 @@ export const SITE = {
     directoryIntroFileName: "README",
     directoryLabelFallback: "default-locale",
     postLocaleFallback: "none",
+    directoryDefaultOpen: true,
   },
   scheduledPostMargin: 15 * 60 * 1000, // 15 minutes
   showArchives: true,
