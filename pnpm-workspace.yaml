@@ -1,0 +1,7 @@
+minimumReleaseAge: 10080
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeStrict: true
+
+allowBuilds:
+  esbuild: true
+  sharp: true
