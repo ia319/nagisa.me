@@ -24,12 +24,3 @@ export function isLocale(value: string | undefined): value is Locale {
 export function normalizeLocale(value: string | undefined): Locale {
   return isLocale(value) ? value : DEFAULT_LOCALE;
 }
-
-/**
- * Resolve the configured writing direction for a locale.
- * @param locale Configured locale code.
- * @returns The locale writing direction.
- */
-export function getLocaleDirection(locale: Locale): LocaleDirection {
-  return LOCALE_DIRECTIONS[locale];
-}
