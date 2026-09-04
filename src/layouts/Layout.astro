@@ -2,7 +2,7 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import { PUBLIC_GOOGLE_SITE_VERIFICATION } from "astro:env/client";
-import { DEFAULT_LOCALE, type Locale } from "@/i18n/config";
+import { DEFAULT_LOCALE, getLocaleDirection, type Locale } from "@/i18n/config";
 import { SITE } from "@/config";
 import "@/styles/global.css";
 
@@ -52,7 +52,11 @@ const structuredData = {
 ---
 
 <!doctype html>
-<html dir={SITE.dir} lang={locale} class={`${scrollSmooth && "scroll-smooth"}`}>
+<html
+  dir={getLocaleDirection(locale)}
+  lang={locale}
+  class={`${scrollSmooth && "scroll-smooth"}`}
+>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
