@@ -3,22 +3,27 @@ import { getCollection } from "astro:content";
 import type { GetStaticPathsOptions } from "astro";
 import getUniqueTags from "@/utils/getUniqueTags";
 import getPostsByTag from "@/utils/getPostsByTag";
+import { DEFAULT_LOCALE } from "@/i18n/config";
+import { getLocalizedPath } from "@/i18n/routes";
 import { SITE } from "@/config";
 
 export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
   const posts = await getCollection("blog");
-  const tags = getUniqueTags(posts, "zh");
+  const tags = getUniqueTags(posts, DEFAULT_LOCALE);
 
   return tags.flatMap(({ tag, tagName }) => {
-    const tagPosts = getPostsByTag(posts, tag, "zh");
+    const tagPosts = getPostsByTag(posts, tag, DEFAULT_LOCALE);
 
     return paginate(tagPosts, {
       params: { tag },
-      props: { tagName },
+      props: {
+        tagName,
+        redirectPath: getLocalizedPath(DEFAULT_LOCALE, "/tags/"),
+      },
       pageSize: SITE.postPerPage,
     });
   });
 }
 
-return Astro.redirect("/zh/tags/");
+return Astro.redirect(Astro.props.redirectPath);
 ---

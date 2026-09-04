@@ -1,3 +1,6 @@
 ---
-return Astro.redirect("/zh/search/");
+import { DEFAULT_LOCALE } from "@/i18n/config";
+import { getLocalizedPath } from "@/i18n/routes";
+
+return Astro.redirect(getLocalizedPath(DEFAULT_LOCALE, "/search/"));
 ---
