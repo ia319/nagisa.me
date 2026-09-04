@@ -1,9 +1,29 @@
 import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
 import { SITE } from "@/config";
+import { isLocale, SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { TRANSLATION_PROVIDER } from "@/content/translationContract.mjs";
 
 export const BLOG_PATH = "src/data/blog";
 export const PAGES_PATH = "src/data/pages";
+
+const translationSchema = z
+  .object({
+    sourceLocale: z.custom<Locale>(
+      value => typeof value === "string" && isLocale(value),
+      {
+        message: `translation.sourceLocale must be one of: ${SUPPORTED_LOCALES.join(", ")}`,
+      }
+    ),
+    provider: z.literal(TRANSLATION_PROVIDER),
+    model: z
+      .string()
+      .min(1, "translation.model must not be empty")
+      .refine(value => value.trim() === value, {
+        message: "translation.model must not have surrounding whitespace",
+      }),
+  })
+  .strict();
 
 const blog = defineCollection({
   loader: glob({ pattern: "**/[^_]*.md", base: `./${BLOG_PATH}` }),
@@ -21,6 +41,7 @@ const blog = defineCollection({
       canonicalURL: z.string().optional(),
       hideEditPost: z.boolean().optional(),
       timezone: z.string().optional(),
+      translation: translationSchema.optional(),
     }),
 });
 
