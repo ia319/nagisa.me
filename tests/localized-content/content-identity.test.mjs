@@ -57,10 +57,64 @@ test("rejects locale suffix casing that would collide on Windows", () => {
   );
 });
 
-test("rejects explicit default suffixes", () => {
+test("accepts either default-locale filename without changing identity", () => {
+  assert.deepEqual(
+    validateLocalizedContentIdentities(["guides/article.fr"], config),
+    [{ baseId: "guides/article", locale: "fr", hasLocaleSuffix: true }]
+  );
+  assert.deepEqual(
+    validateLocalizedContentIdentities(["guides/article"], config),
+    [{ baseId: "guides/article", locale: "fr", hasLocaleSuffix: false }]
+  );
+});
+
+test("preserves explicit language identities when the default changes", () => {
+  assert.deepEqual(
+    validateLocalizedContentIdentities(
+      ["guides/article.fr", "guides/article.zh-Hant"],
+      { ...config, defaultLocale: "zh-Hant" }
+    ).map(identity => [identity.baseId, identity.locale]),
+    [
+      ["guides/article", "fr"],
+      ["guides/article", "zh-Hant"],
+    ]
+  );
+});
+
+test("rejects implicit and explicit default variants in either order", () => {
+  for (const sourceIds of [
+    ["guides/article", "guides/article.fr"],
+    ["guides/article.fr", "guides/article"],
+    ["about", "about.fr"],
+    ["home-intro.fr", "home-intro"],
+  ]) {
+    assert.throws(
+      () => validateLocalizedContentIdentities(sourceIds, config),
+      error => {
+        assert.match(error.message, /define the same base path and locale/);
+        for (const sourceId of sourceIds) {
+          assert.ok(error.message.includes(`"${sourceId}"`));
+        }
+        return true;
+      }
+    );
+  }
+});
+
+test("validates all page identities including pages without a route", () => {
   assert.throws(
-    () => validateLocalizedContentIdentities(["article.fr"], config),
-    /must omit the ".fr" suffix/
+    () =>
+      validateLocalizedContentIdentities(
+        ["about.fr", "home-intro", "unused/page", "unused/page.fr"],
+        config
+      ),
+    /"unused\/page" and "unused\/page.fr" define the same base path and locale/
+  );
+  assert.doesNotThrow(() =>
+    validateLocalizedContentIdentities(
+      ["about.fr", "about.ar", "home-intro", "nested/about.fr"],
+      config
+    )
   );
 });
 

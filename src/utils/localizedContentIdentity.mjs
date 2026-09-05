@@ -91,7 +91,7 @@ export function parseLocalizedContentIdentity(sourceId, config) {
  * @param {readonly string[]} sourceIds Extension-free source IDs to validate.
  * @param {{defaultLocale: string, supportedLocales: readonly string[]}} config Locale identity configuration.
  * @returns {{baseId: string, locale: string, hasLocaleSuffix: boolean}[]} Parsed identities.
- * @throws {Error} When default suffixes, duplicate variants, or case collisions exist.
+ * @throws {Error} When duplicate variants or case collisions exist.
  */
 export function validateLocalizedContentIdentities(sourceIds, config) {
   const identities = sourceIds.map(sourceId => ({
@@ -102,12 +102,6 @@ export function validateLocalizedContentIdentities(sourceIds, config) {
   const sourceIdsByIdentity = new Map();
 
   for (const { sourceId, parsed } of identities) {
-    if (parsed.hasLocaleSuffix && parsed.locale === config.defaultLocale) {
-      throw new Error(
-        `Default locale content "${sourceId}" must omit the ".${config.defaultLocale}" suffix.`
-      );
-    }
-
     const baseCaseKey = getCaseKey(parsed.baseId);
     const existingBaseId = baseIdsByCase.get(baseCaseKey);
 
