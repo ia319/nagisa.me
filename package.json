@@ -9,6 +9,7 @@
     "content:git-meta": "node scripts/generate-content-git-meta.mjs",
     "locales:check": "node scripts/locale-config/check.mjs",
     "locales:generate": "node scripts/locale-config/generate-vercel-config.mjs",
+    "locales:set-default": "node scripts/locale-config/set-default.mjs",
     "sync": "astro sync",
     "astro": "astro",
     "format:check": "prettier --check .",
