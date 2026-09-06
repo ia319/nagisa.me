@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "lint": "eslint .",
-    "test:localized-content": "node --test \"tests/localized-content/**/*.test.mjs\""
+    "test:localized-content": "node --test \"tests/localized-content/**/*.test.mjs\"",
+    "test:content-translate": "node --test \"tests/content-translation/**/*.test.mjs\""
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.14",
@@ -26,6 +27,8 @@
     "dayjs": "^1.11.19",
     "lodash.kebabcase": "^4.1.1",
     "mdast-util-from-markdown": "^2.0.2",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "remark-collapse": "^0.1.2",
     "remark-toc": "^9.0.0",
     "satori": "^0.18.3",
