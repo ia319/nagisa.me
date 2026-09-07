@@ -49,6 +49,21 @@ function fixture(t, contents = {}) {
     else process.env.OLLAMA_HOST = oldHost;
   });
   t.mock.method(globalThis, "fetch", async () => ({ ok: true }));
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (command, input, options, callback) => {
+      assert.equal(command, "powershell.exe");
+      assert.equal(options.encoding, "utf8");
+      assert.equal(options.windowsHide, true);
+      assert.equal(options.shell, false);
+      assert.ok(input.includes("-NonInteractive"));
+      assert.ok(!input.join(" ").includes(memory.root));
+      assert.ok(memory.entries.has(options.env.TRANSLATION_OWNER_TARGET));
+      assert.ok(memory.entries.has(options.env.TRANSLATION_OWNER_TEMP));
+      callback(null, "same\n");
+    }
+  );
   const calls = mockOllama(t, ({ args, prompt }) => ({
     text:
       args[0] === "show"
@@ -186,6 +201,43 @@ test("rejects existing targets before model calls and replaces them only with fo
     /title: Hello/
   );
   assert.equal(mutations.filter(item => item[0] === "rename").length, 1);
+});
+
+test("refuses replacement when ownership differs or cannot be verified", async t => {
+  for (const failure of ["different", "unavailable"]) {
+    const { run, root, entries, mutations, messages } = fixture(t, {
+      "src/data/blog/post.en.md": source,
+    });
+    if (process.platform === "win32") {
+      t.mock.method(
+        childProcess,
+        "execFile",
+        (_command, _input, _options, callback) => {
+          if (failure === "unavailable")
+            callback(new Error("ACL access denied"));
+          else callback(null, "different\n");
+        }
+      );
+    } else {
+      const originalStat = fs.lstat;
+      t.mock.method(fs, "lstat", async file => {
+        const stat = await originalStat(file);
+        if (!path.basename(file).startsWith(".translation-")) return stat;
+        if (failure === "unavailable")
+          throw new Error("Ownership access denied");
+        return { ...stat, gid: stat.gid + 1 };
+      });
+    }
+    await assert.rejects(run([...args, "--force"]), /ownership/i);
+    assert.equal(
+      entries.get(path.join(root, "src/data/blog/post.en.md")).text,
+      source
+    );
+    assert.ok(!mutations.some(item => item[0] === "rename"));
+    assert.ok(
+      messages.some(message => message.startsWith("Temporary file retained"))
+    );
+  }
 });
 
 test("uses UTF-8 prompt-file content in replace mode and validates from and model names", async t => {

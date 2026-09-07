@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import childProcess from "node:child_process";
 import { readProjectFile } from "./snapshot.mjs";
 
 async function inspectTarget(root, relativePath) {
@@ -42,15 +43,6 @@ async function inspectTarget(root, relativePath) {
   }
   if (stat && !stat.isFile())
     throw new Error(`Target is not a regular file: ${relativePath}`);
-  // Atomic replacement must not transfer another user's document ownership.
-  if (
-    stat &&
-    process.getuid &&
-    (stat.uid !== process.getuid() || stat.gid !== process.getgid())
-  )
-    throw new Error(
-      `Cannot preserve target ownership through replacement: ${relativePath}`
-    );
   return {
     path: relativePath,
     file,
@@ -59,6 +51,54 @@ async function inspectTarget(root, relativePath) {
       ? await readProjectFile(root, path.relative(root, file))
       : undefined,
   };
+}
+
+async function verifyReplacementOwner(file, temporary, signal) {
+  let sameOwner;
+  if (process.platform === "win32") {
+    // Node's Windows stats do not expose the owner SID; compare ACL owners without changing them.
+    const script = `$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$originalOwner = [System.IO.File]::GetAccessControl($env:TRANSLATION_OWNER_TARGET, [System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+$temporaryOwner = [System.IO.File]::GetAccessControl($env:TRANSLATION_OWNER_TEMP, [System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+if ($originalOwner -eq $temporaryOwner) { 'same' } else { 'different' }`;
+    sameOwner = await new Promise((resolve, reject) => {
+      childProcess.execFile(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        {
+          encoding: "utf8",
+          windowsHide: true,
+          shell: false,
+          timeout: 10000,
+          signal,
+          env: {
+            ...process.env,
+            TRANSLATION_OWNER_TARGET: file,
+            TRANSLATION_OWNER_TEMP: temporary,
+          },
+        },
+        (error, stdout) => {
+          if (error)
+            reject(
+              new Error("Cannot verify Windows file ownership", {
+                cause: error,
+              })
+            );
+          else resolve(stdout.trim() === "same");
+        }
+      );
+    });
+  } else {
+    const [original, replacement] = await Promise.all([
+      fs.lstat(file),
+      fs.lstat(temporary),
+    ]);
+    sameOwner =
+      original.uid === replacement.uid && original.gid === replacement.gid;
+  }
+  if (!sameOwner)
+    throw new Error(`Atomic replacement would change file ownership: ${file}`);
 }
 
 /**
@@ -129,6 +169,8 @@ export async function writeTranslations(prepared, outputs, report, signal) {
       } finally {
         await handle.close();
       }
+      if (target.before !== undefined)
+        await verifyReplacementOwner(target.file, temporary, signal);
       signal.throwIfAborted();
       if (
         (await inspectTarget(prepared.root, target.path)).before !==
