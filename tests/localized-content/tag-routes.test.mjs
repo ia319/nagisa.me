@@ -16,8 +16,15 @@ const registry = {
   },
 };
 const modules = new Map();
+const collectionUrl = `data:text/javascript;base64,${Buffer.from(
+  `let posts = [];
+export function setPosts(value) { posts = value; }
+export async function getCollection() { return posts; }`,
+  "utf8"
+).toString("base64")}`;
+const { setPosts } = await import(collectionUrl);
 
-// Compile the actual site adapters in memory; only Astro's schema entry and locale data are isolated.
+// Compile site adapters and page builders in memory, isolating Astro content loading and locale data.
 function moduleUrl(file) {
   if (modules.has(file)) return modules.get(file);
   let source;
@@ -31,6 +38,27 @@ function moduleUrl(file) {
       .map(match => match[0])
       .join("\n");
     assert.ok(source.includes("BLOG_PATH"));
+  } else if (file.endsWith(".astro")) {
+    const frontmatter = readFileSync(file, "utf8").match(
+      /^---\r?\n([\s\S]*?)\r?\n---/
+    )?.[1];
+    assert.ok(frontmatter);
+    const parsed = ts.createSourceFile(
+      file,
+      frontmatter,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.TS
+    );
+    source = parsed.statements
+      .filter(
+        statement =>
+          ts.isImportDeclaration(statement) ||
+          (ts.isFunctionDeclaration(statement) &&
+            statement.name?.text === "getStaticPaths")
+      )
+      .map(statement => statement.getText(parsed))
+      .join("\n");
   } else if (!file.endsWith(".ts")) return pathToFileURL(file).href;
   else source = readFileSync(file, "utf8");
   let code = ts
@@ -52,6 +80,14 @@ function moduleUrl(file) {
     )
       continue;
     const specifier = statement.moduleSpecifier.text;
+    if (specifier === "astro:content") {
+      replacements.push({
+        start: statement.moduleSpecifier.getStart(parsed),
+        end: statement.moduleSpecifier.end,
+        text: JSON.stringify(collectionUrl),
+      });
+      continue;
+    }
     if (!specifier.startsWith("@/") && !specifier.startsWith(".")) continue;
     const resolved = specifier.startsWith("@/")
       ? path.join(root, "src", specifier.slice(2))
@@ -193,5 +229,107 @@ test("refuses an unreachable mapped target and rejects duplicate public URLs", (
   assert.throws(
     () => getTagIndex([post("a", ["A"]), post("a.fr", ["B"])]),
     /same base path and locale/
+  );
+});
+
+const collectionPage = await import(
+  moduleUrl(path.join(root, "src/pages/[locale]/tags/index.astro"))
+);
+const detailPath = path.join(
+  root,
+  "src/pages/[locale]/tags/[tag]/[...page].astro"
+);
+const detailPage = await import(moduleUrl(detailPath));
+
+test("collection pages expose only their language's public tags", async () => {
+  setPosts([
+    ...posts,
+    post("hidden.pt-BR", ["Oculto"], undefined, { draft: true }),
+  ]);
+  const routes = await collectionPage.getStaticPaths();
+  assert.deepEqual(
+    routes.map(route => route.params.locale),
+    Object.keys(registry.locales)
+  );
+  assert.deepEqual(
+    routes.map(route => route.props.tags.map(tag => tag.tagName)),
+    [["Outils"], ["Tools"], ["أدوات"], []]
+  );
+});
+
+test("detail pages pass public articles and resolved links to pagination and Header", async t => {
+  const logs = [];
+  t.mock.method(process.stderr, "write", message => {
+    logs.push(String(message));
+    return true;
+  });
+  setPosts([
+    ...posts,
+    post("second", ["Outils"]),
+    post("hidden.en", ["Tools"], undefined, { draft: true }),
+  ]);
+  const calls = [];
+  const routes = await detailPage.getStaticPaths({
+    paginate(data, options) {
+      calls.push({ data, options });
+      return [{ params: options.params, props: options.props }];
+    },
+  });
+  assert.equal(routes.length, 3);
+  const french = calls.find(call => call.options.params.locale === "fr");
+  assert.deepEqual(
+    french.data.map(post => post.id),
+    ["guide", "second"]
+  );
+  const english = calls.find(call => call.options.params.locale === "en");
+  assert.deepEqual(
+    english.data.map(post => post.id),
+    ["guide.en"]
+  );
+  assert.equal(english.options.props.tagName, "Tools");
+  assert.equal(english.options.props.languageLinks.fr, "/fr/tags/outils");
+  assert.equal(french.options.props.languageLinks.en, "/en/tags/tools");
+  assert.equal(french.options.props.languageLinks["pt-BR"], "/pt-BR/tags");
+  assert.ok(french.options.pageSize > 0);
+  assert.ok(logs.some(message => message.includes("missing-translation")));
+  const template = readFileSync(detailPath, "utf8");
+  assert.match(
+    template,
+    /<Header locale=\{locale\} languageLinks=\{languageLinks\}/
+  );
+  assert.match(template, /<h1\b[^>]*>[\s\S]*?\$\{tagName\}[\s\S]*?<\/h1>/);
+});
+
+test("page generation logs ambiguous relationships and rejects route collisions", async t => {
+  const logs = [];
+  t.mock.method(process.stderr, "write", message => {
+    logs.push(String(message));
+    return true;
+  });
+  setPosts([
+    ...posts,
+    post("second", ["Outils"]),
+    post("second.en", ["Utilities"], "fr"),
+  ]);
+  const routes = await detailPage.getStaticPaths({
+    paginate(_data, options) {
+      return [options];
+    },
+  });
+  const french = routes.find(route => route.params.locale === "fr");
+  assert.equal(french.props.languageLinks.en, "/en/tags");
+  assert.ok(
+    logs.some(message => message.includes("Ambiguous tag relationship"))
+  );
+  assert.ok(logs.some(message => message.includes("ambiguous-mapping")));
+  setPosts([post("a", ["Tools"]), post("b", ["tools"])]);
+  await assert.rejects(collectionPage.getStaticPaths(), /Tag route collision/);
+  await assert.rejects(
+    detailPage.getStaticPaths({
+      paginate() {
+        assert.fail("must reject before pagination");
+      },
+    }),
+    /Tag route collision/
   );
 });

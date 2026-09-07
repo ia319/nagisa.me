@@ -5,27 +5,30 @@ import Layout from "@/layouts/Layout.astro";
 import Tag from "@/components/Tag.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
-import getUniqueTags from "@/utils/getUniqueTags";
+import { getTagIndex, type TagRoute } from "@/utils/getTagIndex";
 import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
 import { t } from "@/i18n/ui";
 import { SITE } from "@/config";
 
 type Props = {
   locale: Locale;
+  tags: TagRoute[];
 };
 
-export function getStaticPaths() {
+/**
+ * Generate each language's collection from the public tag index.
+ * @returns Localized collection routes and their tag data.
+ * @throws {Error} When content identities or public tag routes conflict.
+ */
+export async function getStaticPaths() {
+  const index = getTagIndex(await getCollection("blog"));
   return SUPPORTED_LOCALES.map(locale => ({
     params: { locale },
-    props: { locale },
+    props: { locale, tags: index.tags.filter(tag => tag.locale === locale) },
   }));
 }
 
-const { locale } = Astro.props;
-
-const posts = await getCollection("blog");
-
-let tags = getUniqueTags(posts, locale);
+const { locale, tags } = Astro.props;
 ---
 
 <Layout locale={locale} title={`${t(locale, "tags.title")} | ${SITE.title}`}>
