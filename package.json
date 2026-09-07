@@ -7,6 +7,7 @@
     "build": "node scripts/locale-config/check.mjs && astro check && astro build && pagefind --site dist && node -e \"const fs=require('node:fs');fs.cpSync('dist/pagefind','public/pagefind',{recursive:true,force:true});\"",
     "preview": "astro preview",
     "content:git-meta": "node scripts/generate-content-git-meta.mjs",
+    "content:translate": "node scripts/content-translation/translate.mjs",
     "locales:check": "node scripts/locale-config/check.mjs",
     "locales:generate": "node scripts/locale-config/generate-vercel-config.mjs",
     "locales:set-default": "node scripts/locale-config/set-default.mjs",
