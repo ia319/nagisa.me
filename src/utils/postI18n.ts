@@ -1,10 +1,11 @@
 import type { CollectionEntry } from "astro:content";
 import { BLOG_PATH } from "@/content.config";
-import { isLocale, type Locale } from "@/i18n/config";
+import type { Locale } from "@/i18n/config";
 import {
   getRelativeContentFilePath,
   getSourceIdFromContentFilePath,
   parseLocalizedSourceId,
+  validateLocalizedSourceIds,
   type ParsedLocalizedSourceId,
 } from "./contentSource";
 
@@ -70,23 +71,36 @@ export function getPostBaseId(postOrId: BlogPostReference | string) {
   return getPostSource(postOrId).baseId;
 }
 
-export function stripLocaleFromPostSlug(slug: string) {
-  const match = slug.match(/^(.*)\.([^.]+)$/);
-  return match && isLocale(match[2]) ? match[1] : slug;
-}
-
 export function filterPostsByLocale(posts: BlogPost[], locale: Locale) {
   return posts.filter(post => getPostLocale(post) === locale);
 }
 
-export function findPostTranslation(
-  posts: BlogPost[],
-  post: BlogPost,
-  locale: Locale
-) {
+/**
+ * Validate every blog source before routes select individual language variants.
+ * @param posts Blog collection entries to validate.
+ * @returns Nothing.
+ * @throws {Error} When two files conflict or use an invalid localized filename.
+ */
+export function validatePostLocalizations(posts: BlogPost[]): void {
+  validateLocalizedSourceIds(posts.map(getPostSourceId));
+}
+
+/**
+ * Index the available translations that share a post's base path.
+ * @param posts Blog collection entries containing possible translations.
+ * @param post Post whose translations should be selected.
+ * @returns Available translations keyed by locale.
+ * @throws {Error} When localized source identities are invalid.
+ */
+export function getPostTranslations(posts: BlogPost[], post: BlogPost) {
+  validatePostLocalizations(posts);
   const baseId = getPostBaseId(post);
-  return posts.find(
-    candidate =>
-      getPostBaseId(candidate) === baseId && getPostLocale(candidate) === locale
-  );
+  const translations = new Map<Locale, BlogPost>();
+
+  for (const candidate of posts) {
+    if (getPostBaseId(candidate) !== baseId) continue;
+    translations.set(getPostLocale(candidate), candidate);
+  }
+
+  return translations;
 }

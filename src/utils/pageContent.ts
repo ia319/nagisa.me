@@ -5,6 +5,7 @@ import {
   getRelativeContentFilePath,
   getSourceIdFromContentFilePath,
   parseLocalizedSourceId,
+  validateLocalizedSourceIds,
   type ParsedLocalizedSourceId,
 } from "./contentSource";
 
@@ -54,11 +55,21 @@ export function getPageContentBaseId(
   return parsePageContentId(getPageContentSourceId(pageContentOrId)).baseId;
 }
 
+/**
+ * Select a page variant after validating the entire page collection.
+ * @param pageContents Page collection entries, including unused content.
+ * @param baseId Content-root-relative base path to select.
+ * @param locale Preferred locale, with the default locale as fallback.
+ * @returns The localized page, its default-locale fallback, or undefined.
+ * @throws {Error} When page source identities conflict or paths are invalid.
+ */
 export function findLocalizedPageContent(
   pageContents: PageContent[],
   baseId: string,
   locale: Locale
 ) {
+  validateLocalizedSourceIds(pageContents.map(getPageContentSourceId));
+
   const currentLocaleContent = pageContents.find(
     pageContent =>
       getPageContentBaseId(pageContent) === baseId &&

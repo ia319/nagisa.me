@@ -4,14 +4,20 @@
   "version": "5.5.1",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro check && astro build && pagefind --site dist && node -e \"const fs=require('node:fs');fs.cpSync('dist/pagefind','public/pagefind',{recursive:true,force:true});\"",
+    "build": "node scripts/locale-config/check.mjs && astro check && astro build && pagefind --site dist && node -e \"const fs=require('node:fs');fs.cpSync('dist/pagefind','public/pagefind',{recursive:true,force:true});\"",
     "preview": "astro preview",
     "content:git-meta": "node scripts/generate-content-git-meta.mjs",
+    "content:translate": "node scripts/content-translation/translate.mjs",
+    "locales:check": "node scripts/locale-config/check.mjs",
+    "locales:generate": "node scripts/locale-config/generate-vercel-config.mjs",
+    "locales:set-default": "node scripts/locale-config/set-default.mjs",
     "sync": "astro sync",
     "astro": "astro",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:localized-content": "node --test \"tests/localized-content/**/*.test.mjs\"",
+    "test:content-translate": "node --test \"tests/content-translation/**/*.test.mjs\""
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.14",
@@ -21,12 +27,16 @@
     "astro": "^5.16.6",
     "dayjs": "^1.11.19",
     "lodash.kebabcase": "^4.1.1",
+    "mdast-util-from-markdown": "^2.0.2",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "remark-collapse": "^0.1.2",
     "remark-toc": "^9.0.0",
     "satori": "^0.18.3",
     "sharp": "^0.34.5",
     "slugify": "^1.6.6",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
