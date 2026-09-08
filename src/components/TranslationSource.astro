@@ -1,0 +1,72 @@
+---
+import type { CollectionEntry } from "astro:content";
+import { LOCALE_LABELS, type Locale } from "@/i18n/config";
+import { t } from "@/i18n/ui";
+import { getPostTranslationSource } from "@/utils/postI18n";
+import { getPath } from "@/utils/getPath";
+
+type Props = {
+  locale: Locale;
+  post: CollectionEntry<"blog">;
+  translations: ReadonlyMap<Locale, CollectionEntry<"blog">>;
+};
+
+const { locale, post, translations } = Astro.props;
+const { translation } = post.data;
+const source = getPostTranslationSource(post, translations);
+const sourceHref =
+  source.status === "resolved"
+    ? getPath(source.source.post.id, source.source.post.filePath)
+    : undefined;
+let sourceLanguage = translation
+  ? (LOCALE_LABELS[translation.sourceLocale] ?? translation.sourceLocale)
+  : "";
+
+if (translation && typeof Intl.DisplayNames === "function") {
+  try {
+    if (Intl.DisplayNames.supportedLocalesOf([locale]).length) {
+      sourceLanguage =
+        new Intl.DisplayNames([locale], {
+          type: "language",
+          fallback: "none",
+        }).of(translation.sourceLocale) ?? sourceLanguage;
+    }
+  } catch {
+    // Some valid registry codes have no DisplayNames language entry; retain the configured label.
+  }
+}
+---
+
+{
+  translation && (
+    <aside
+      class="not-prose mt-8 flex max-w-full justify-end"
+      data-pagefind-ignore
+    >
+      <dl class="m-0 max-w-full text-end text-xs leading-6 text-foreground/65 sm:text-sm">
+        <div class="flex flex-wrap justify-end gap-x-1.5">
+          <dt>{t(locale, "translation.sourceLanguage")}</dt>
+          <dd class="m-0 min-w-0 wrap-anywhere">
+            {sourceHref ? (
+              <a
+                href={sourceHref}
+                hreflang={translation.sourceLocale}
+                class="font-medium text-foreground/80 underline decoration-dashed underline-offset-4 hover:text-accent"
+              >
+                <bdi>{sourceLanguage}</bdi>
+              </a>
+            ) : (
+              <bdi>{sourceLanguage}</bdi>
+            )}
+          </dd>
+        </div>
+        <div class="flex flex-wrap justify-end gap-x-1.5">
+          <dt>{t(locale, "translation.model")}</dt>
+          <dd class="m-0 min-w-0 wrap-anywhere">
+            <bdi dir="ltr">{translation.model}</bdi>
+          </dd>
+        </div>
+      </dl>
+    </aside>
+  )
+}

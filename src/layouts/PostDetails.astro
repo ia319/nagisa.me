@@ -6,6 +6,7 @@ import Footer from "@/components/Footer.astro";
 import Tag from "@/components/Tag.astro";
 import Datetime from "@/components/Datetime.astro";
 import ContentGitMeta from "@/components/ContentGitMeta.astro";
+import TranslationSource from "@/components/TranslationSource.astro";
 import EditPost from "@/components/EditPost.astro";
 import ShareLinks from "@/components/ShareLinks.astro";
 import BackButton from "@/components/BackButton.astro";
@@ -138,7 +139,13 @@ const languageLinks = Object.fromEntries(
       class="app-prose mt-8 w-full max-w-app prose-pre:bg-(--shiki-light-bg) dark:prose-pre:bg-(--shiki-dark-bg)"
     >
       <Content />
-      <ContentGitMeta filePath={post.filePath} {locale} {timezone} />
+      <TranslationSource {post} {translations} {locale} />
+      <ContentGitMeta
+        filePath={post.filePath}
+        {locale}
+        {timezone}
+        class={post.data.translation ? "mt-2!" : undefined}
+      />
     </article>
 
     <hr class="my-8 border-dashed" />
