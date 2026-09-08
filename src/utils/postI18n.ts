@@ -1,6 +1,7 @@
 import type { CollectionEntry } from "astro:content";
 import { BLOG_PATH } from "@/content.config";
 import type { Locale } from "@/i18n/config";
+import { resolveTranslationSource } from "@/content/translationContract.mjs";
 import {
   getRelativeContentFilePath,
   getSourceIdFromContentFilePath,
@@ -103,4 +104,30 @@ export function getPostTranslations(posts: BlogPost[], post: BlogPost) {
   }
 
   return translations;
+}
+
+/**
+ * Resolve the declared source against available non-draft article variants.
+ * @param post Article whose translation metadata declares the source language.
+ * @param translations Same-base variants returned by getPostTranslations.
+ * @returns The shared source resolution result with the source blog entry.
+ * @throws {Error} When an entry has an invalid localized source path.
+ */
+export function getPostTranslationSource(
+  post: BlogPost,
+  translations: ReadonlyMap<Locale, BlogPost>
+) {
+  const { baseId, locale } = getPostSource(post);
+  // Detail routes include scheduled articles; only drafts lack a generated route.
+  const candidates = [...translations.values()]
+    .filter(candidate => !candidate.data.draft)
+    .map(candidate => {
+      const { baseId, locale } = getPostSource(candidate);
+      return { baseId, locale, post: candidate };
+    });
+
+  return resolveTranslationSource(
+    { baseId, locale, translation: post.data.translation },
+    candidates
+  );
 }
