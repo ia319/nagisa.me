@@ -212,6 +212,21 @@ test("rejects existing targets unless forced and preserves replacement permissio
   assert.equal(mutations.filter(item => item[0] === "chmod").length, 1);
 });
 
+test("rejects a source-language target before model calls or writes, even with force", async t => {
+  const { run, entries, root, calls, mutations } = fixture(t);
+  for (const forceArgs of [[], ["--force"]])
+    await assert.rejects(run([...args, "--to", "fr", ...forceArgs]), {
+      message:
+        "Target language matches the source language (fr); choose a different --to language",
+    });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(mutations, []);
+  assert.equal(
+    entries.get(path.join(root, "src/data/blog/post.fr.md")).text,
+    source
+  );
+});
+
 test("refuses replacement when ownership differs or cannot be verified", async t => {
   for (const failure of ["different", "unavailable"]) {
     const { run, root, entries, mutations, messages } = fixture(t, {

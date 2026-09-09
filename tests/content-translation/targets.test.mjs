@@ -19,8 +19,11 @@ test("plans multiple languages in the source directory with any configured defau
     ["guides/post.md", "guides/post.pt-BR.md", "guides/post.ar.md"]
   );
   assert.equal(
-    planTranslationTargets({ ...base, sourcePath: "guides/version.2.md" })
-      .source.baseId,
+    planTranslationTargets({
+      ...base,
+      sourcePath: "guides/version.2.md",
+      targetLocales: ["en"],
+    }).source.baseId,
     "guides/version.2"
   );
 });
@@ -37,16 +40,27 @@ test("reuses an existing explicit default suffix only with overwrite permission"
   );
 });
 
-test("applies ordinary overwrite rules when translating to the source language", () => {
-  assert.throws(
-    () => planTranslationTargets({ ...base, targetLocales: ["en"] }),
-    /already exists/
-  );
-  assert.equal(
-    planTranslationTargets({ ...base, targetLocales: ["en"], force: true })
-      .targets[0].path,
-    base.sourcePath
-  );
+test("rejects the source language with either filename form, even with force", () => {
+  for (const [sourcePath, sourceLocale] of [
+    ["guides/post.en.md", "en"],
+    ["guides/post.md", "fr"],
+    ["guides/post.fr.md", "fr"],
+  ]) {
+    for (const force of [false, true])
+      assert.throws(
+        () =>
+          planTranslationTargets({
+            ...base,
+            sourcePath,
+            files: [{ path: sourcePath, kind: "file" }],
+            targetLocales: [sourceLocale],
+            force,
+          }),
+        {
+          message: `Target language matches the source language (${sourceLocale}); choose a different --to language`,
+        }
+      );
+  }
 });
 
 test("rejects duplicate targets, unknown locales, and mismatched source declarations", () => {

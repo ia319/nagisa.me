@@ -22,7 +22,7 @@ function validateSnapshotPath(value) {
  * Real paths, permissions, and final write checks belong to the CLI boundary.
  * @param {{sourcePath: string, files: readonly FileState[], targetLocales: readonly string[], config: {defaultLocale: string, supportedLocales: readonly string[]}, fromLocale?: string, force?: boolean}} input Source path, languages, and existing entry states.
  * @returns {{source: {baseId: string, locale: string, hasLocaleSuffix: boolean}, targets: {path: string, locale: string, overwrite: boolean}[]}} Source identity and validated output paths.
- * @throws {Error} When languages, content identities, or target paths conflict.
+ * @throws {Error} When languages or paths conflict, including a target matching the source locale.
  */
 export function planTranslationTargets({
   sourcePath,
@@ -53,6 +53,10 @@ export function planTranslationTargets({
   const source = parseLocalizedContentIdentity(sourcePath.slice(0, -3), config);
   if (fromLocale !== undefined && fromLocale !== source.locale)
     throw new Error(`Source locale is ${source.locale}, not ${fromLocale}`);
+  if (targetLocales.includes(source.locale))
+    throw new Error(
+      `Target language matches the source language (${source.locale}); choose a different --to language`
+    );
   const contentPaths = files
     .filter(
       file =>
