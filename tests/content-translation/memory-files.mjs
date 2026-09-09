@@ -59,7 +59,7 @@ export function memoryFiles(t, contents) {
     assert.equal(flags, "wx");
     assert.ok(!entries.has(file));
     assert.equal(get(path.dirname(file)).kind, "directory");
-    const entry = { kind: "file", text: "", mode };
+    const entry = { kind: "file", text: "", mode: mode & ~0o022 };
     entries.set(file, entry);
     mutations.push(["open", file]);
     return {
@@ -67,6 +67,10 @@ export function memoryFiles(t, contents) {
         assert.equal(encoding, "utf8");
         entry.text = text;
         mutations.push(["write", file]);
+      },
+      chmod: async mode => {
+        entry.mode = mode;
+        mutations.push(["chmod", file]);
       },
       sync: async () => {
         mutations.push(["sync", file]);

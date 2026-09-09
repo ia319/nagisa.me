@@ -188,9 +188,9 @@ test("generates every target before writing drafts and leaves source text unchan
   );
 });
 
-test("rejects existing targets before model calls and replaces them only with force", async t => {
+test("rejects existing targets unless forced and preserves replacement permissions", async t => {
   const { run, entries, root, calls, mutations } = fixture(t, {
-    "src/data/blog/post.en.md": source,
+    "src/data/blog/post.en.md": { kind: "file", text: source, mode: 0o664 },
   });
   await assert.rejects(run(), /already exists/);
   assert.deepEqual(calls, []);
@@ -201,6 +201,15 @@ test("rejects existing targets before model calls and replaces them only with fo
     /title: Hello/
   );
   assert.equal(mutations.filter(item => item[0] === "rename").length, 1);
+  assert.equal(
+    entries.get(path.join(root, "src/data/blog/post.en.md")).mode,
+    0o664
+  );
+  assert.equal(
+    entries.get(path.join(root, "src/data/blog/post.ar.md")).mode,
+    0o644
+  );
+  assert.equal(mutations.filter(item => item[0] === "chmod").length, 1);
 });
 
 test("refuses replacement when ownership differs or cannot be verified", async t => {

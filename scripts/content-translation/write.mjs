@@ -165,6 +165,7 @@ export async function writeTranslations(prepared, outputs, report, signal) {
       temporary = candidate;
       try {
         await handle.writeFile(text, "utf8");
+        if (target.before !== undefined) await handle.chmod(target.mode);
         await handle.sync();
       } finally {
         await handle.close();
