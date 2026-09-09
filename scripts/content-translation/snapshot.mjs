@@ -202,6 +202,8 @@ export async function readTranslationSnapshot(root, selection) {
     if (!articles.has(sourcePath))
       throw new Error("Source is not a readable blog entry");
   }
+  // Evaluate the captured snapshot, which may differ from the working tree.
+  // Require a self-contained default export: data URLs cannot resolve relative imports.
   const { default: config } = await import(
     `data:text/javascript;base64,${Buffer.from(registryText, "utf8").toString("base64")}`
   );
