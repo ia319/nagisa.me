@@ -346,14 +346,26 @@ export function validateTranslation(plan, responses, files) {
       translatedBody,
       article.body
     )) {
+      const sourcePoint = diagnostic.source;
+      const targetPoint = diagnostic.target;
       diagnostics.push({
         code: diagnostic.code,
         message:
-          output.path +
-          ": " +
+          `src/data/blog/${output.path}${targetPoint ? `:${article.bodyLine + targetPoint.line - 1}:${targetPoint.column}` : " (target location unavailable)"}: ${diagnostic.details.length} related finding(s)` +
+          `\n  Source: src/data/blog/${plan.sourcePath}${sourcePoint ? `:${plan.article.bodyLine + sourcePoint.line - 1}:${sourcePoint.column}` : " (no corresponding source node)"}` +
           diagnostic.details
-            .map(item => "[" + item.code + "] " + item.message)
-            .join("; "),
+            .map(
+              item =>
+                `\n  - [${item.code}] ${item.message}\n    ` +
+                (item.source
+                  ? `source src/data/blog/${plan.sourcePath}:${plan.article.bodyLine + item.source.line - 1}:${item.source.column}`
+                  : "source location unavailable") +
+                (item.target
+                  ? `; saved src/data/blog/${output.path}:${article.bodyLine + item.target.line - 1}:${item.target.column}`
+                  : "; saved location unavailable")
+            )
+            .join("") +
+          `\n  Original: ${diagnostic.original}\n  Saved: ${diagnostic.saved}`,
       });
     }
     completed.push({ ...output, fields: article.fields });

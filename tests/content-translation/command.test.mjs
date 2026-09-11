@@ -385,7 +385,7 @@ test("writes every draft before reporting invalid body output and retains the re
   );
   assert.ok(written >= 0);
   assert.ok(warning > written);
-  assert.match(messages[warning], /post.en.md:.*placeholder-missing/);
+  assert.match(messages[warning], /Source: src\/data\/blog\/post.fr.md:6:\d+/);
   assert.ok(
     messages.some(message => message.includes("[placeholder-unknown]"))
   );
@@ -410,7 +410,9 @@ test("reads actual saved drafts for non-blocking structure checks", async t => {
     messages.some(
       message =>
         message.startsWith("[validation:markdown-node]") &&
-        /post.en.md:[\s\S]*Expected paragraph, received heading/.test(message)
+        /post.en.md:\d+:\d+:[\s\S]*Expected paragraph, received heading/.test(
+          message
+        )
     )
   );
   assert.match(messages.at(-1), /Generated 2 draft/);

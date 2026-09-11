@@ -53,7 +53,10 @@ export async function runTranslationCommand(
   const result = completeTranslation(plan, responses);
   await writeTranslations(writes, result.files, report, signal);
   for (const diagnostic of plan.diagnostics) {
-    report(`[source:${diagnostic.code}] ${diagnostic.message}`);
+    const point = diagnostic.source;
+    report(
+      `[source:${diagnostic.code}] src/data/blog/${snapshot.source.path}${point ? `:${plan.article.bodyLine + point.line - 1}:${point.column}` : ""}: ${diagnostic.message}`
+    );
   }
   const savedFiles = [];
   const diagnostics = [];

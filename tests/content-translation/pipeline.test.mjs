@@ -199,6 +199,42 @@ test("round-trips translated JSON strings through YAML including punctuation and
   assert.deepEqual(validateTranslation(plan, responses, result.files), []);
 });
 
+test("reports physical source and saved line numbers including multiline frontmatter", () => {
+  const original =
+    "---\n# Context\ntitle: A\ndescription: |\n  B\n  C\n---\nBefore **one** and `code`.\n";
+  const plan = prepareTranslation({
+    ...input,
+    targetLocales: ["en"],
+    source: { ...input.source, text: original },
+  });
+  const responses = plan.requests.map(request => ({
+    id: request.id,
+    text:
+      request.field === "metadata"
+        ? JSON.stringify({
+            title: "Title",
+            description: "First\nSecond\nThird",
+          })
+        : "Before ** one ** and __KEEP_999_999__.",
+  }));
+  const result = completeTranslation(plan, responses);
+  const savedLines = result.files[0].text.split("\n");
+  const savedLine = savedLines.findIndex(line => line.startsWith("Before")) + 1;
+  const warnings = validateTranslation(plan, responses, result.files);
+  const group = warnings.find(item => item.code === "placeholder-missing");
+  assert.match(
+    group.message,
+    /source src\/data\/blog\/guides\/post.fr.md:8:20/
+  );
+  assert.ok(
+    group.message.includes(
+      `saved src/data/blog/guides/post.en.md:${savedLine}:22`
+    )
+  );
+  assert.ok(!group.message.includes("saved occurrences:"));
+  assert.equal(plan.article.bodyLine, 8);
+});
+
 test("assembles all targets from model text without exposing copied metadata", () => {
   const before = structuredClone(input);
   const plan = prepareTranslation(input);
@@ -387,7 +423,7 @@ test("assembles invalid model bodies and reports missing content without rejecti
     diagnostics.some(
       item =>
         item.code === "placeholder-missing" &&
-        /guides\/post.en.md:/.test(item.message)
+        /Source: src\/data\/blog\/guides\/post.fr.md:\d+:\d+/.test(item.message)
     )
   );
   assert.ok(
