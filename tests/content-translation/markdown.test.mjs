@@ -6,6 +6,76 @@ import {
 } from "../../scripts/content-translation/markdown.mjs";
 import { validateMarkdown } from "../../scripts/content-translation/markdown-validation.mjs";
 
+test("protects hard-break syntax while allowing translated prose to wrap differently", () => {
+  for (const marker of ["\\", "  ", "   "]) {
+    const body = "第一句。" + marker + "\n第二句。\n";
+    const plan = prepareMarkdown(body);
+    const hardBreak = plan.protected.find(item => item.kind === "hard-break");
+    assert.equal(hardBreak.value, marker);
+    assert.equal(plan.text, "第一句。" + hardBreak.token + "\n第二句。\n");
+    assert.equal(restoreMarkdown(plan, plan.text), body);
+    for (const separator of ["\n", " \t\n", ""]) {
+      const response =
+        "The translated first sentence\nuses more than one line." +
+        hardBreak.token +
+        separator +
+        "The second sentence.\n";
+      const saved = restoreMarkdown(plan, response);
+      assert.equal(
+        saved,
+        "The translated first sentence\nuses more than one line." +
+          marker +
+          "\nThe second sentence.\n"
+      );
+      assert.deepEqual(validateMarkdown(plan, response, saved), []);
+    }
+  }
+  for (const body of ["> First\\\n> Second.\n", "- First  \n  Second.\n"]) {
+    const plan = prepareMarkdown(body);
+    const response = plan.text
+      .replace("First", "First translated sentence")
+      .replace("Second", "Second translated sentence");
+    const saved = restoreMarkdown(plan, response);
+    assert.deepEqual(validateMarkdown(plan, response, saved), []);
+  }
+  const plain = prepareMarkdown("A sentence without a hard break.\n");
+  const wrapped = "One translated\nparagraph over\nthree lines.\n";
+  assert.deepEqual(validateMarkdown(plain, wrapped, wrapped), []);
+  assert.equal(plain.protected.length, 0);
+});
+
+test("reports lost or repeated hard-break tokens without guessing their positions", () => {
+  const plan = prepareMarkdown("First\\\nSecond.\n");
+  const token = plan.protected[0].token;
+  const missing = plan.text.replace(token, "");
+  const saved = restoreMarkdown(plan, missing);
+  assert.equal(saved, "First\nSecond.\n");
+  const findings = validateMarkdown(plan, missing, saved).flatMap(
+    group => group.details
+  );
+  assert.ok(
+    findings.some(
+      item =>
+        item.code === "placeholder-missing" &&
+        item.message.includes("hard-break")
+    )
+  );
+  assert.ok(
+    findings.some(item => item.message === "Expected break, received no node")
+  );
+  const repeated = plan.text.replace(token, token + token);
+  assert.ok(
+    validateMarkdown(plan, repeated, restoreMarkdown(plan, repeated)).some(
+      group => group.details.some(item => item.code === "placeholder-duplicate")
+    )
+  );
+  const literal = prepareMarkdown(
+    "Literal \\*text\\* and `a\\nb`.\n\n```text\nFirst\\\nSecond\n```\n"
+  );
+  assert.ok(literal.protected.every(item => item.kind !== "hard-break"));
+  assert.equal(restoreMarkdown(literal, literal.text), literal.body);
+});
+
 test("keeps resource boundaries canonical for nested URLs, escaped labels, titles, and Unicode", () => {
   for (const body of [
     "[Read](https://example.com/a(b(c)) \"A title\") and ![Picture](<./a b.png> 'Caption').\n",

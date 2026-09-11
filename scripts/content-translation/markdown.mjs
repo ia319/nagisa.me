@@ -31,6 +31,8 @@ export function prepareMarkdown(body) {
     const from = node.position.start.offset;
     const to = node.position.end.offset;
     const raw = body.slice(from, to);
+    if (node.type === "break")
+      spans.push({ start: from, end: to - 1, kind: "hard-break" });
     if (
       node.type === "text" ||
       ["image", "imageReference"].includes(node.type)
@@ -155,8 +157,17 @@ export function prepareMarkdown(body) {
  */
 export function restoreMarkdown(plan, translation) {
   const values = new Map(plan.protected.map(item => [item.token, item.value]));
+  const hardBreaks = new Set(
+    plan.protected
+      .filter(item => item.kind === "hard-break")
+      .map(item => item.token)
+  );
   return translation.replace(
-    placeholderPattern,
-    token => values.get(token) ?? token
+    /(__KEEP_\d+_\d+__)([ \t]*\n)?/g,
+    (match, token, newline = "") => {
+      // A hard-break token owns one newline, including when the model removes or pads it.
+      if (hardBreaks.has(token)) return values.get(token) + "\n";
+      return values.has(token) ? values.get(token) + newline : match;
+    }
   );
 }
