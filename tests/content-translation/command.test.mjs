@@ -13,7 +13,7 @@ import {
 } from "../../scripts/content-translation/write.mjs";
 import { parseArticle } from "../../scripts/content-translation/frontmatter.mjs";
 import { memoryFiles } from "./memory-files.mjs";
-import { mockOllama } from "./mock-ollama.mjs";
+import { captureOllamaOutput, mockOllama } from "./mock-ollama.mjs";
 
 const source =
   "---\ntitle: Bonjour\ndescription: Exemple\ntags: [Outils]\n---\nBonjour `code` et [guide](https://example.com).\n";
@@ -77,6 +77,7 @@ function fixture(t, contents = {}) {
   const controller = new AbortController();
   const messages = [];
   const report = message => messages.push(message);
+  const output = captureOllamaOutput().output;
   return {
     ...memory,
     calls,
@@ -84,7 +85,13 @@ function fixture(t, contents = {}) {
     messages,
     report,
     run: (input = args) =>
-      runTranslationCommand(memory.root, input, report, controller.signal),
+      runTranslationCommand(
+        memory.root,
+        input,
+        report,
+        controller.signal,
+        output
+      ),
   };
 }
 

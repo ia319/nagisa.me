@@ -12,10 +12,17 @@ import { prepareWrites, writeTranslations } from "./write.mjs";
  * @param {string[]} args Command arguments after the script name.
  * @param {(message: string) => void} report Help, progress, and diagnostic sink.
  * @param {AbortSignal} signal Cancellation signal shared with process and write boundaries.
+ * @param {{stdout: import("node:stream").Writable, stderr: import("node:stream").Writable}} output Destinations for original Ollama output.
  * @returns {Promise<void>} Resolves after help or successful publication.
  * @throws {Error} When arguments, preflight, generation, validation, or publication fails.
  */
-export async function runTranslationCommand(root, args, report, signal) {
+export async function runTranslationCommand(
+  root,
+  args,
+  report,
+  signal,
+  output
+) {
   const options = parseTranslationArgs(
     args,
     process.env.OLLAMA_TRANSLATE_MODEL
@@ -38,7 +45,8 @@ export async function runTranslationCommand(root, args, report, signal) {
     plan.requests,
     plan.model,
     report,
-    signal
+    signal,
+    output
   );
   const result = completeTranslation(plan, responses);
   for (const diagnostic of result.diagnostics) {

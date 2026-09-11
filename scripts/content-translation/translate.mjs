@@ -11,7 +11,8 @@ try {
     process.cwd(),
     process.argv.slice(2),
     message => process.stdout.write(`${message}\n`),
-    controller.signal
+    controller.signal,
+    { stdout: process.stdout, stderr: process.stderr }
   );
 } catch (error) {
   process.stderr.write(`content:translate: ${error.message}\n`);
