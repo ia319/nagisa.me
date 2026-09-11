@@ -204,6 +204,69 @@ test("saves every draft before reporting malformed metadata and never retries ge
   assert.match(messages.at(-1), /Generated 2 draft/);
 });
 
+test("separates raw output, draft writes, and content checks even without a model trailing newline", async t => {
+  const { root, entries, output, chunks, controller, messages } = fixture(t, {
+    "src/data/blog/post.fr.md": source + "\n<!-- Keep this comment. -->\n",
+  });
+  let lastRawBody;
+  mockOllama(t, ({ args, prompt }) => {
+    if (args[0] === "show") return { text: "Model info\n" };
+    const text = prompt.split("Text to translate:\n").at(-1).trimEnd();
+    if (args.includes("--format")) return { text: JSON.stringify(parse(text)) };
+    lastRawBody = "\u001b[36m" + text + "\u001b[0m";
+    return { text: lastRawBody };
+  });
+  await runTranslationCommand(
+    root,
+    ["src/data/blog/post.fr.md", "--to", "en", "--model", "example:12b"],
+    message => {
+      messages.push(message);
+      output.stdout.write(message + "\n");
+    },
+    controller.signal,
+    output
+  );
+  const terminal = Buffer.concat(chunks.stdout).toString("utf8");
+  assert.ok(
+    terminal.includes(
+      lastRawBody +
+        "\n--- Save drafts ---\nWritten: src/data/blog/post.en.md\n\n--- Content checks ---\n[source:"
+    )
+  );
+  assert.equal(terminal.split(lastRawBody).length - 1, 1);
+  for (const section of ["\n--- Save drafts ---", "\n--- Content checks ---"])
+    assert.equal(messages.filter(message => message === section).length, 1);
+  const written = messages.indexOf("Written: src/data/blog/post.en.md");
+  const checks = messages.indexOf("\n--- Content checks ---");
+  assert.ok(checks > written);
+  assert.ok(
+    messages.findIndex(message => message.startsWith("[source:")) > checks
+  );
+  assert.ok(
+    messages.findIndex(message => message.startsWith("Content validation:")) >
+      checks
+  );
+  const saved = entries.get(path.join(root, "src/data/blog/post.en.md")).text;
+  assert.ok(!saved.includes("--- Save drafts ---"));
+  assert.ok(!saved.includes("--- Content checks ---"));
+  assert.ok(saved.includes("<!-- Keep this comment. -->"));
+});
+
+test("labels saving and checking correctly when protected-only content needs no model request", async t => {
+  const { run, calls, messages } = fixture(t, {
+    "src/data/blog/post.fr.md":
+      "---\ntitle: ''\ndescription: ''\n---\n```text\nKeep this.\n```\n",
+  });
+  await run();
+  assert.deepEqual(calls, []);
+  assert.equal(messages[0], "\n--- Save drafts ---");
+  assert.ok(
+    messages.indexOf("\n--- Content checks ---") >
+      messages.indexOf("Written: src/data/blog/post.ar.md")
+  );
+  assert.match(messages.at(-1), /Generated 2 draft/);
+});
+
 test("generates every target before writing drafts and leaves source text unchanged", async t => {
   const { run, root, entries, calls, mutations } = fixture(t);
   const originalOpen = fs.open;

@@ -51,7 +51,9 @@ export async function runTranslationCommand(
     output
   );
   const result = completeTranslation(plan, responses);
+  report("\n--- Save drafts ---");
   await writeTranslations(writes, result.files, report, signal);
+  report("\n--- Content checks ---");
   for (const diagnostic of plan.diagnostics) {
     const point = diagnostic.source;
     report(
