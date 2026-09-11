@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseTranslationArgs, TRANSLATION_HELP } from "./options.mjs";
-import { readTranslationSnapshot } from "./snapshot.mjs";
+import { readTranslationSnapshot, readProjectFile } from "./snapshot.mjs";
 import {
   prepareTranslation,
   completeTranslation,
@@ -11,7 +11,7 @@ import { runOllamaRequests } from "./ollama.mjs";
 import { prepareWrites, writeTranslations } from "./write.mjs";
 
 /**
- * Report content checks and write translation drafts.
+ * Write translation drafts, then report content checks without rejecting saved results.
  * @param {string} root Working directory, expected to be the project root.
  * @param {string[]} args Command arguments after the script name.
  * @param {(message: string) => void} report Help, progress, and diagnostic sink.
@@ -51,14 +51,41 @@ export async function runTranslationCommand(
     output
   );
   const result = completeTranslation(plan, responses);
+  await writeTranslations(writes, result.files, report, signal);
   for (const diagnostic of plan.diagnostics) {
     report(`[source:${diagnostic.code}] ${diagnostic.message}`);
   }
-  const diagnostics = validateTranslation(plan, responses, result.files);
+  const savedFiles = [];
+  const diagnostics = [];
+  for (const file of result.files) {
+    try {
+      savedFiles.push({
+        path: file.path,
+        text: await readProjectFile(
+          snapshot.root,
+          path.join("src/data/blog", file.path)
+        ),
+      });
+    } catch (error) {
+      diagnostics.push({
+        code: "read-failed",
+        message: `${file.path}: draft was written, but could not be read for validation: ${error.message}`,
+      });
+    }
+  }
+  try {
+    diagnostics.push(...validateTranslation(plan, responses, savedFiles));
+  } catch (error) {
+    diagnostics.push({
+      code: "check-failed",
+      message: `Content validation could not finish: ${error.message}. Saved drafts were kept.`,
+    });
+  }
   for (const diagnostic of diagnostics)
     report(`[validation:${diagnostic.code}] ${diagnostic.message}`);
-  report(`Content validation: ${diagnostics.length} issue group(s).`);
-  await writeTranslations(writes, result.files, report, signal);
+  report(
+    `Content validation: ${diagnostics.length} issue group(s). Saved drafts were kept.`
+  );
   report(
     `Generated ${result.files.length} draft article(s). Review translations before publication.`
   );

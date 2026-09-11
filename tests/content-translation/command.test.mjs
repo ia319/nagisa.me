@@ -158,6 +158,52 @@ test("help returns before all filesystem, process, and network access", async t 
   assert.ok(messages.every(message => message.startsWith("Usage:")));
 });
 
+test("saves every draft before reporting malformed metadata and never retries generation", async t => {
+  const { run, root, entries, messages, chunks } = fixture(t);
+  const calls = mockOllama(t, ({ args, prompt }) => ({
+    text:
+      args[0] === "show"
+        ? "Model info\n"
+        : args.includes("--format")
+          ? "not JSON\n"
+          : prompt
+              .split("Text to translate:\n")
+              .at(-1)
+              .replace("Bonjour", "Hello"),
+  }));
+  await run();
+  assert.equal(calls.filter(call => call.args[0] === "run").length, 4);
+  const lastWrite = messages.findIndex(
+    message => message === "Written: src/data/blog/post.ar.md"
+  );
+  assert.ok(lastWrite >= 0);
+  const warnings = messages.flatMap((message, index) =>
+    message.startsWith("[validation:metadata-parse]") ? [index] : []
+  );
+  assert.equal(warnings.length, 2);
+  assert.ok(warnings.every(index => index > lastWrite));
+  assert.equal(
+    Buffer.concat(chunks.stdout).toString("utf8").split("not JSON\n").length -
+      1,
+    2
+  );
+  for (const locale of ["en", "ar"]) {
+    const article = parseArticle(
+      entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
+    );
+    assert.equal(article.fields.title, "Bonjour");
+    assert.equal(article.fields.description, "Exemple");
+    assert.deepEqual(article.fields.tags, ["Outils"]);
+    assert.match(article.body, /Hello `code`/);
+    assert.equal(article.document.get("draft"), true);
+  }
+  assert.equal(
+    entries.get(path.join(root, "src/data/blog/post.fr.md")).text,
+    source
+  );
+  assert.match(messages.at(-1), /Generated 2 draft/);
+});
+
 test("generates every target before writing drafts and leaves source text unchanged", async t => {
   const { run, root, entries, calls, mutations } = fixture(t);
   const originalOpen = fs.open;
@@ -308,6 +354,114 @@ test("a failed last target still produces no writes", async t => {
   });
   await assert.rejects(run(), /failed/);
   assert.deepEqual(mutations, []);
+});
+
+test("writes every draft before reporting invalid body output and retains the results", async t => {
+  const { run, root, entries, mutations, messages, chunks } = fixture(t);
+  mockOllama(t, ({ args, prompt }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    return {
+      text: args.includes("--format")
+        ? JSON.stringify(parse(prompt.split("Text to translate:\n").at(-1)))
+        : "Missing protected content __KEEP_999_999__",
+    };
+  });
+  await run();
+  assert.equal(mutations.filter(item => item[0] === "link").length, 2);
+  for (const locale of ["en", "ar"]) {
+    const article = parseArticle(
+      entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
+    );
+    assert.equal(article.document.get("draft"), true);
+    assert.ok(
+      article.body.includes("Missing protected content __KEEP_999_999__")
+    );
+  }
+  const warning = messages.findIndex(message =>
+    message.startsWith("[validation:placeholder-missing]")
+  );
+  const written = messages.findIndex(
+    message => message === "Written: src/data/blog/post.ar.md"
+  );
+  assert.ok(written >= 0);
+  assert.ok(warning > written);
+  assert.match(messages[warning], /post.en.md:.*placeholder-missing/);
+  assert.ok(
+    messages.some(message => message.includes("[placeholder-unknown]"))
+  );
+  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.ok(
+    Buffer.concat(chunks.stdout)
+      .toString("utf8")
+      .includes("Missing protected content")
+  );
+});
+
+test("reads actual saved drafts for non-blocking structure checks", async t => {
+  const { run, entries, messages } = fixture(t);
+  const originalLink = fs.link;
+  t.mock.method(fs, "link", async (from, to) => {
+    await originalLink(from, to);
+    const file = entries.get(to);
+    file.text = file.text.replace("\nHello `code`", "\n# Hello `code`");
+  });
+  await run();
+  assert.ok(
+    messages.some(
+      message =>
+        message.startsWith("[validation:markdown-node]") &&
+        /post.en.md:[\s\S]*Expected paragraph, received heading/.test(message)
+    )
+  );
+  assert.match(messages.at(-1), /Generated 2 draft/);
+});
+
+test("retains written drafts when post-write reads fail", async t => {
+  const { run, root, entries, messages } = fixture(t);
+  const originalRead = fs.readFile;
+  t.mock.method(fs, "readFile", async (file, ...options) => {
+    if (String(file).endsWith("post.en.md"))
+      throw new Error("Review read denied");
+    return originalRead(file, ...options);
+  });
+  await run();
+  assert.ok(entries.has(path.join(root, "src/data/blog/post.en.md")));
+  assert.ok(
+    messages.some(
+      message =>
+        message.startsWith("[validation:read-failed]") &&
+        /post.en.md:.*Review read denied/.test(message)
+    )
+  );
+  assert.ok(
+    messages.some(message =>
+      message.startsWith("[validation:tag-check-skipped]")
+    )
+  );
+  assert.match(messages.at(-1), /Generated 2 draft/);
+});
+
+test("reports new tag-route collisions only after draft writes", async t => {
+  const { run, root, entries, messages } = fixture(t, {
+    "src/data/blog/another.en.md": source.replace(
+      "tags: [Outils]",
+      "tags: [tools]"
+    ),
+  });
+  await run();
+  assert.ok(entries.has(path.join(root, "src/data/blog/post.en.md")));
+  const warning = messages.findIndex(message =>
+    message.startsWith("[validation:tag-route]")
+  );
+  assert.ok(warning >= 0);
+  assert.ok(
+    warning >
+      messages.findIndex(
+        message => message === "Written: src/data/blog/post.ar.md"
+      )
+  );
+  assert.match(messages[warning], /Tag route collision/);
+  assert.match(messages.at(-1), /Generated 2 draft/);
 });
 
 test("retains successful writes and reports failed and pending targets", async t => {

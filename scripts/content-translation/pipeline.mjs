@@ -208,7 +208,7 @@ function readMetadata(output, text) {
  * Assemble draft articles from completed requests without gating on content quality.
  * @param {ReturnType<typeof prepareTranslation>} plan Prepared requests and source snapshot.
  * @param {readonly {id: string, text: string}[]} responses One response for each request.
- * @returns {{files: {path: string, locale: string, overwrite: boolean, text: string}[]}} Complete output set awaiting publication.
+ * @returns {{files: {path: string, locale: string, overwrite: boolean, text: string}[]}} Complete output set awaiting post-write content review.
  * @throws {Error} When request results are missing, duplicated, or not usable text.
  */
 export function completeTranslation(plan, responses) {
@@ -245,10 +245,10 @@ export function completeTranslation(plan, responses) {
 }
 
 /**
- * Inspect draft articles and report content issues without rejecting results.
+ * Inspect saved drafts and report content issues without rejecting saved results.
  * @param {ReturnType<typeof prepareTranslation>} plan Source snapshot and requested fields.
  * @param {readonly {id: string, text: string}[]} responses Original model results for placeholder checks.
- * @param {readonly {path: string, text: string}[]} files Article texts to inspect.
+ * @param {readonly {path: string, text: string}[]} files Article texts read after successful writes.
  * @returns {{code: string, message: string}[]} Review findings with file, field, and difference details.
  */
 export function validateTranslation(plan, responses, files) {
