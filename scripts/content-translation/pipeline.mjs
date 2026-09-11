@@ -6,6 +6,7 @@ import { validateLocaleRegistry } from "../locale-config/registry.mjs";
 import { parseDocument, stringify } from "yaml";
 import { parseArticle, renderArticle } from "./frontmatter.mjs";
 import { prepareMarkdown, restoreMarkdown } from "./markdown.mjs";
+import { updateMarkdownAnchors } from "./markdown-anchors.mjs";
 import { validateMarkdown } from "./markdown-validation.mjs";
 import { buildTranslationPrompt } from "./prompts.mjs";
 import { planTranslationTargets } from "./targets.mjs";
@@ -226,9 +227,10 @@ export function completeTranslation(plan, responses) {
     );
   const files = plan.outputs.map(output => {
     const { fields } = readMetadata(output, results.get(output.metadataId));
-    const body = output.bodyId
+    const restored = output.bodyId
       ? restoreMarkdown(plan.markdown, results.get(output.bodyId))
       : plan.markdown.body;
+    const body = updateMarkdownAnchors(plan.markdown, restored).body;
     return {
       path: output.path,
       locale: output.locale,

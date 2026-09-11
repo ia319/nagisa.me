@@ -4,6 +4,7 @@ import {
   parseMarkdown,
 } from "./markdown-syntax.mjs";
 import { placeholderPattern, resolveBlockSeparators } from "./markdown.mjs";
+import { resolveMarkdownAnchors } from "./markdown-anchors.mjs";
 
 /** @typedef {import("./markdown-syntax.mjs").Point} Point */
 /** @typedef {import("./markdown-syntax.mjs").Diagnostic} Diagnostic */
@@ -108,6 +109,10 @@ function excerpt(body, node) {
 export function validateMarkdown(plan, translation, body) {
   const targetTree = parseMarkdown(body).tree;
   const expectedTree = structuredClone(plan.tree);
+  const policy = resolveMarkdownAnchors(plan, targetTree);
+  for (const { node } of markdownEntries(expectedTree))
+    if (["link", "definition"].includes(node.type) && policy.urls.has(node.url))
+      node.url = policy.urls.get(node.url);
   const sourceEntries = markdownEntries(expectedTree);
   const targetEntries = markdownEntries(targetTree);
   const sourceOwners = reviewOwners(sourceEntries);
@@ -256,6 +261,12 @@ export function validateMarkdown(plan, translation, body) {
       undefined,
       pointAt(plan.body, separator.before.end)
     );
+  }
+  for (const diagnostic of policy.diagnostics) {
+    const node = sourceEntries.findLast(
+      entry => entry.node.position.start.offset === diagnostic.source.offset
+    )?.node;
+    add(diagnostic.code, diagnostic.message, node);
   }
   const found = [...translation.matchAll(placeholderPattern)];
   const expected = new Set(plan.protected.map(item => item.token));
