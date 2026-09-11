@@ -115,6 +115,38 @@ export function validateMarkdown(plan, translation, body) {
       node.url = policy.urls.get(node.url);
   const sourceEntries = markdownEntries(expectedTree);
   const targetEntries = markdownEntries(targetTree);
+  const embeddedNodes = new Map();
+  const embeddedDefinitions = new Map();
+  for (const { node } of sourceEntries) {
+    if (!["html", "definition", "code"].includes(node.type)) continue;
+    const raw = plan.body.slice(
+      node.position.start.offset,
+      node.position.end.offset
+    );
+    const offset = body.indexOf(raw);
+    if (
+      !raw ||
+      offset < 0 ||
+      offset !== body.lastIndexOf(raw) ||
+      plan.body.indexOf(raw) !== plan.body.lastIndexOf(raw)
+    )
+      continue;
+    const container = targetEntries.find(
+      entry =>
+        entry.node.type === "html" &&
+        entry.node.position.start.offset <= offset &&
+        entry.node.position.end.offset >= offset + raw.length &&
+        (node.type !== "html" ||
+          entry.node.position.start.offset < offset ||
+          entry.node.position.end.offset > offset + raw.length)
+    )?.node;
+    if (container) {
+      const retained = { node: container, point: pointAt(body, offset) };
+      embeddedNodes.set(node, retained);
+      if (node.type === "definition")
+        embeddedDefinitions.set(node.identifier, retained);
+    }
+  }
   const sourceOwners = reviewOwners(sourceEntries);
   const targetOwners = reviewOwners(targetEntries);
   const sourcePartners = new Map();
@@ -159,6 +191,39 @@ export function validateMarkdown(plan, translation, body) {
   }
   function compare(source, target) {
     if (!source || !target) {
+      const retained = embeddedNodes.get(source);
+      if (source && !target && retained) {
+        add(
+          "markdown-context",
+          source.type +
+            " text is retained inside a larger HTML block instead of a separate " +
+            source.type +
+            " node; review the block separator",
+          source,
+          retained.node,
+          source.position.start,
+          retained.point
+        );
+        return;
+      }
+      const definition = embeddedDefinitions.get(source?.identifier);
+      if (
+        source &&
+        !target &&
+        definition &&
+        ["linkReference", "imageReference"].includes(source.type)
+      ) {
+        add(
+          "markdown-reference",
+          source.type +
+            " is not recognized because its definition [" +
+            source.identifier +
+            "] is retained inside an HTML block",
+          source,
+          sourcePartners.get(sourceOwners.get(source))
+        );
+        return;
+      }
       add(
         "markdown-node",
         "Expected " +
@@ -215,6 +280,27 @@ export function validateMarkdown(plan, translation, body) {
       }
       for (const child of remaining) compare(undefined, child);
     } else {
+      const keys = [sourceChildren, targetChildren].map(children =>
+        children.map(node =>
+          ["html", "code", "definition", "footnoteDefinition"].includes(
+            node.type
+          )
+            ? JSON.stringify(
+                node.type === "footnoteDefinition"
+                  ? { type: node.type, identifier: node.identifier }
+                  : structure(node)
+              )
+            : undefined
+        )
+      );
+      const anchors = keys.map(values => {
+        const indices = new Map();
+        values.forEach((key, index) => {
+          if (key !== undefined)
+            indices.set(key, indices.has(key) ? undefined : index);
+        });
+        return indices;
+      });
       let leftIndex = 0;
       let rightIndex = 0;
       while (
@@ -223,6 +309,35 @@ export function validateMarkdown(plan, translation, body) {
       ) {
         const leftChild = sourceChildren[leftIndex];
         const rightChild = targetChildren[rightIndex];
+        if (
+          leftChild &&
+          rightChild &&
+          keys[0][leftIndex] !== keys[1][rightIndex]
+        ) {
+          // Unique stable nodes anchor alignment after a run of missing or added blocks.
+          const nextLeft =
+            anchors[1].get(keys[1][rightIndex]) === rightIndex
+              ? anchors[0].get(keys[1][rightIndex])
+              : undefined;
+          const nextRight =
+            anchors[0].get(keys[0][leftIndex]) === leftIndex
+              ? anchors[1].get(keys[0][leftIndex])
+              : undefined;
+          if (
+            nextLeft > leftIndex &&
+            (!(nextRight > rightIndex) ||
+              nextLeft - leftIndex <= nextRight - rightIndex)
+          ) {
+            compare(leftChild, undefined);
+            leftIndex++;
+            continue;
+          }
+          if (nextRight > rightIndex) {
+            compare(undefined, rightChild);
+            rightIndex++;
+            continue;
+          }
+        }
         if (leftChild && rightChild && leftChild.type !== rightChild.type) {
           if (sourceChildren[leftIndex + 1]?.type === rightChild.type) {
             compare(leftChild, undefined);

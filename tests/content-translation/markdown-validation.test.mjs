@@ -6,6 +6,68 @@ import {
 } from "../../scripts/content-translation/markdown.mjs";
 import { validateMarkdown } from "../../scripts/content-translation/markdown-validation.mjs";
 
+test("distinguishes embedded definitions from deleted content without misaligning later notes", () => {
+  const body =
+    "[Read][guide] and [Short].\n\n![Picture][logo]\n\nText[^note].\n\n" +
+    "<div>\nUnchanged HTML.\n</div>\n\n<!-- Keep this comment. -->\n\n" +
+    "[guide]: https://example.com/reference\n[Short]: https://example.com/shortcut\n[logo]: /favicon.svg\n\n" +
+    "[^note]: Footnote text.\n\n<!-- End. -->\n";
+  const plan = prepareMarkdown(body);
+  const saved = body.replace(
+    "</div>\n\n<!-- Keep this comment. -->\n\n",
+    "</div>\n<!-- Keep this comment. -->\n"
+  );
+  const groups = validateMarkdown(plan, plan.text, saved);
+  const details = groups.flatMap(group => group.details);
+  assert.equal(groups.length, 3);
+  assert.equal(
+    details.filter(item => item.code === "markdown-context").length,
+    4
+  );
+  assert.equal(
+    details.filter(item => item.code === "markdown-reference").length,
+    3
+  );
+  assert.ok(!details.some(item => item.message.includes("footnoteDefinition")));
+  assert.ok(
+    !details.some(item =>
+      item.message.includes("Expected definition, received no node")
+    )
+  );
+  assert.ok(!details.some(item => item.message.includes("<!-- End. -->")));
+  const contexts = details.filter(item => item.code === "markdown-context");
+  for (const item of contexts) {
+    const savedLine = saved.split("\n")[item.target.line - 1];
+    assert.ok(savedLine.startsWith("<!--") || savedLine.startsWith("["));
+  }
+  const missing = body
+    .replace("<!-- Keep this comment. -->\n\n", "")
+    .replace("[guide]: https://example.com/reference\n", "")
+    .replace("[Short]: https://example.com/shortcut\n", "")
+    .replace("[logo]: /favicon.svg\n", "");
+  const missingDetails = validateMarkdown(plan, plan.text, missing).flatMap(
+    group => group.details
+  );
+  assert.equal(
+    missingDetails.filter(
+      item => item.message === "Expected definition, received no node"
+    ).length,
+    3
+  );
+  assert.ok(
+    !missingDetails.some(item => item.message.includes("footnoteDefinition"))
+  );
+  assert.ok(!missingDetails.some(item => item.code === "markdown-context"));
+  const missingNote = body.replace("[^note]: Footnote text.\n\n", "");
+  assert.ok(
+    validateMarkdown(plan, plan.text, missingNote).some(group =>
+      group.details.some(
+        item => item.message === "Expected footnoteDefinition, received no node"
+      )
+    )
+  );
+});
+
 test("groups broken emphasis and missing code without losing repeated finding positions", () => {
   const body =
     "Before **first** and **second**, *third*, ~~fourth~~, `code`.\n\nUnchanged.\n";
@@ -34,6 +96,30 @@ test("groups broken emphasis and missing code without losing repeated finding po
   );
   assert.equal(group.original, JSON.stringify(body.split("\n\n")[0]));
   assert.equal(group.saved, JSON.stringify(response.split("\n\n")[0]));
+});
+
+test("keeps ordinary block alignment while using only unique protected nodes as anchors", () => {
+  const heading = prepareMarkdown("## Heading\n\nFirst.\n\nSecond.\n");
+  const response =
+    "Translated first paragraph.\n\nTranslated second paragraph.\n";
+  const groups = validateMarkdown(heading, response, response);
+  assert.equal(groups.length, 1);
+  assert.equal(
+    groups[0].details[0].message,
+    "Expected heading, received no node"
+  );
+  const repeated = prepareMarkdown(
+    "<!-- Same -->\n\n<!-- Same -->\n\n[^note]: Note.\n"
+  );
+  const missing = "<!-- Same -->\n\n[^note]: Translated note.\n";
+  const findings = validateMarkdown(repeated, repeated.text, missing).flatMap(
+    group => group.details
+  );
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].message, "Expected html, received no node");
+  assert.ok(
+    !findings.some(item => item.message.includes("footnoteDefinition"))
+  );
 });
 
 test("records each unknown token and control character at its actual saved offset", () => {

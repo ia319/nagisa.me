@@ -482,6 +482,74 @@ test("supports append and replace context while retaining mandatory rules", () =
   );
 });
 
+test("keeps format boundaries in two complete requests without constraining translated line counts", () => {
+  const sourceText =
+    "---\ntitle: Installation\ndescription: Exemple\n---\n" +
+    "Bonjour\\\nSuite.\n\n[Guide][docs]\n\n<div>\nOriginal HTML.\n</div>\n\n[docs]: https://example.com\n";
+  for (const promptMode of ["append", "replace"]) {
+    const plan = prepareTranslation({
+      ...input,
+      targetLocales: ["en"],
+      source: { ...input.source, text: sourceText },
+      promptMode,
+      userPrompt: "Use formal terminology",
+    });
+    assert.equal(plan.requests.length, 2);
+    const bodyRequest = plan.requests.find(request => request.field === "body");
+    const metadataRequest = plan.requests.find(
+      request => request.field === "metadata"
+    );
+    assert.match(
+      bodyRequest.prompt,
+      /Ordinary paragraph text may wrap onto a different number of lines/
+    );
+    assert.match(
+      bodyRequest.prompt,
+      /preserve the blank lines separating them from surrounding blocks/
+    );
+    assert.match(
+      bodyRequest.prompt,
+      /Preserve existing Markdown hard-break markers/
+    );
+    assert.ok(!bodyRequest.prompt.includes("on their original lines"));
+    assert.ok(!metadataRequest.prompt.includes("hard-break"));
+    for (const item of plan.markdown.protected)
+      assert.ok(bodyRequest.prompt.includes(item.token));
+    const responses = plan.requests.map(request => {
+      const response = translate(request);
+      if (request.field === "body")
+        response.text = response.text
+          .replace(
+            "Hello",
+            "A translated sentence\nthat uses more physical lines"
+          )
+          .replace(
+            /^(__KEEP_\d+_\d+__)\n\n(?=__KEEP_\d+_\d+__(?:\n|$))/gm,
+            "$1\n"
+          );
+      return response;
+    });
+    const result = completeTranslation(plan, responses);
+    const saved = parseArticle(result.files[0].text);
+    assert.ok(saved.body.includes("more physical lines\\\nSuite."));
+    assert.ok(saved.body.includes("</div>\n\n[docs]:"));
+    assert.deepEqual(validateTranslation(plan, responses, result.files), []);
+    const changed = [
+      {
+        ...result.files[0],
+        text: result.files[0].text.replace(
+          "</div>\n\n[docs]:",
+          "</div>\n[docs]:"
+        ),
+      },
+    ];
+    const warnings = validateTranslation(plan, responses, changed);
+    assert.ok(warnings.some(item => item.message.includes("retained inside")));
+    assert.ok(warnings.every(item => /post.en.md:\d+:\d+/.test(item.message)));
+    assert.equal(plan.requests.length, 2);
+  }
+});
+
 test("normalizes source encoding and rejects unsafe model metadata", () => {
   const plan = prepareTranslation({
     ...input,
