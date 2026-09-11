@@ -3,7 +3,7 @@ import {
   markdownEntries,
   parseMarkdown,
 } from "./markdown-syntax.mjs";
-import { placeholderPattern } from "./markdown.mjs";
+import { placeholderPattern, resolveBlockSeparators } from "./markdown.mjs";
 
 /** @typedef {import("./markdown-syntax.mjs").Point} Point */
 /** @typedef {import("./markdown-syntax.mjs").Diagnostic} Diagnostic */
@@ -237,6 +237,26 @@ export function validateMarkdown(plan, translation, body) {
     }
   }
   compare(expectedTree, targetTree);
+  for (const { separator, reason } of resolveBlockSeparators(plan, translation)
+    .unresolved) {
+    const node = sourceEntries.findLast(
+      entry =>
+        entry.node.position.start.offset <= separator.before.start &&
+        entry.node.position.end.offset >= separator.before.end
+    )?.node;
+    add(
+      "block-separator-unresolved",
+      "Kept the separator between " +
+        separator.before.token +
+        " and " +
+        separator.after.token +
+        " unchanged: " +
+        reason,
+      node,
+      undefined,
+      pointAt(plan.body, separator.before.end)
+    );
+  }
   const found = [...translation.matchAll(placeholderPattern)];
   const expected = new Set(plan.protected.map(item => item.token));
   for (const item of plan.protected) {

@@ -9,12 +9,13 @@ const pathPattern =
   /(?:[A-Za-z]:[\\/]|\.{0,2}\/|[\p{L}\p{N}_.-]+\/)[\p{L}\p{N}_.~%+@:/\\-]+|[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.(?:md|mdx|json|ya?ml|[cm]?[jt]sx?|astro|css|html|toml|sh|ps1)\b/gu;
 
 /** @typedef {{token: string, value: string, start: number, end: number, kind: string}} ProtectedValue */
+/** @typedef {{before: ProtectedValue, after: ProtectedValue, value: string, indentation: string}} BlockSeparator */
 /** @typedef {import("./markdown-syntax.mjs").Diagnostic} Diagnostic */
 
 /**
  * Protect non-translatable values without hiding ordinary Markdown formatting.
  * @param {string} body LF-normalized Markdown source.
- * @returns {{body: string, text: string, tree: import("mdast").Root, protected: ProtectedValue[], needsTranslation: boolean, diagnostics: Diagnostic[]}} One masked body and locally retained originals.
+ * @returns {{body: string, text: string, tree: import("mdast").Root, protected: ProtectedValue[], separators: BlockSeparator[], needsTranslation: boolean, diagnostics: Diagnostic[]}} One masked body and locally retained originals.
  */
 export function prepareMarkdown(body) {
   const { tree, resources } = parseMarkdown(body);
@@ -122,6 +123,33 @@ export function prepareMarkdown(body) {
     cursor = span.end;
   }
   text += body.slice(cursor);
+  const separators = [];
+  for (let index = 1; index < protectedValues.length; index++) {
+    const before = protectedValues[index - 1];
+    const after = protectedValues[index];
+    if (
+      ![before, after].every(item =>
+        ["code-block", "html", "definition"].includes(item.kind)
+      )
+    )
+      continue;
+    const indentation = body.slice(
+      body.lastIndexOf("\n", before.start - 1) + 1,
+      before.start
+    );
+    const afterLineEnd = body.indexOf("\n", after.end);
+    const suffix = body.slice(
+      after.end,
+      afterLineEnd < 0 ? body.length : afterLineEnd
+    );
+    const value = body.slice(before.end, after.start);
+    if (
+      /^[ \t]*$/.test(indentation) &&
+      /^[ \t]*$/.test(suffix) &&
+      /^[ \t]*\n(?:[ \t]*\n)+[ \t]*$/.test(value)
+    )
+      separators.push({ before, after, value, indentation });
+  }
   const needsTranslation = sourceEntries.some(({ node }) => {
     if (
       node.type !== "text" &&
@@ -144,18 +172,71 @@ export function prepareMarkdown(body) {
     text,
     tree,
     protected: protectedValues,
+    separators,
     needsTranslation,
     diagnostics,
   };
 }
 
 /**
- * Restore protected content without guessing missing text.
+ * Resolve safe block-separator repairs and explain boundaries that cannot be restored.
+ * @param {ReturnType<typeof prepareMarkdown>} plan Protected blocks and original separators.
+ * @param {string} translation Complete model body before restoration.
+ * @returns {{edits: {start: number, end: number, value: string}[], unresolved: {separator: BlockSeparator, reason: string}[]}} Safe replacement ranges and unresolved boundaries for post-write review.
+ */
+export function resolveBlockSeparators(plan, translation) {
+  const occurrences = new Map();
+  for (const match of translation.matchAll(placeholderPattern)) {
+    if (!occurrences.has(match[0])) occurrences.set(match[0], []);
+    occurrences.get(match[0]).push(match.index);
+  }
+  const edits = [];
+  const unresolved = [];
+  for (const separator of plan.separators) {
+    const before = occurrences.get(separator.before.token) ?? [];
+    const after = occurrences.get(separator.after.token) ?? [];
+    // Missing and repeated tokens already receive their own validation findings.
+    if (before.length !== 1 || after.length !== 1) continue;
+    const start = before[0] + separator.before.token.length;
+    const end = after[0];
+    const gap = translation.slice(start, end);
+    if (start <= end && gap === separator.value) continue;
+    const prefix = translation.slice(
+      translation.lastIndexOf("\n", before[0] - 1) + 1,
+      before[0]
+    );
+    const tokenEnd = after[0] + separator.after.token.length;
+    const lineEnd = translation.indexOf("\n", tokenEnd);
+    const suffix = translation.slice(
+      tokenEnd,
+      lineEnd < 0 ? translation.length : lineEnd
+    );
+    let reason;
+    if (start > end) reason = "the placeholders changed order";
+    else if (!/^[ \t\n]*$/.test(gap))
+      reason = "new content separates the placeholders";
+    else if (prefix !== separator.indentation || !/^[ \t]*$/.test(suffix))
+      reason =
+        "the placeholders no longer have their original standalone block context";
+    if (reason) unresolved.push({ separator, reason });
+    else edits.push({ start, end, value: separator.value });
+  }
+  return { edits, unresolved };
+}
+
+/**
+ * Restore protected content and unambiguous block boundaries without guessing missing text.
  * @param {ReturnType<typeof prepareMarkdown>} plan Local originals and placeholder identities.
  * @param {string} translation Complete model body.
  * @returns {string} Best-effort restored Markdown for the saved draft.
  */
 export function restoreMarkdown(plan, translation) {
+  const { edits } = resolveBlockSeparators(plan, translation);
+  for (const edit of edits.sort((left, right) => right.start - left.start))
+    translation =
+      translation.slice(0, edit.start) +
+      edit.value +
+      translation.slice(edit.end);
   const values = new Map(plan.protected.map(item => [item.token, item.value]));
   const hardBreaks = new Set(
     plan.protected

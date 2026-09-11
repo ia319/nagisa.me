@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import {
   prepareMarkdown,
   restoreMarkdown,
@@ -74,6 +76,78 @@ test("reports lost or repeated hard-break tokens without guessing their position
   );
   assert.ok(literal.protected.every(item => item.kind !== "hard-break"));
   assert.equal(restoreMarkdown(literal, literal.text), literal.body);
+});
+
+test("restores collapsed protected-block gaps and renders links, images, notes, and hard breaks", async () => {
+  const body =
+    "[Read][guide], [Short], and [Collapsed][].\n\n![Picture][logo]\n\nText[^note].\n\nFirst\\\nSecond.\n\n" +
+    '```js\nconst value = "unchanged";\n```\n\n~~~text\nunchanged\n~~~\n\n    indented code\n\n' +
+    "<div>\nUnchanged HTML.\n</div>\n\n<!-- Keep this comment. -->\n\n" +
+    "[guide]: https://example.com/reference\n[Short]: https://example.com/shortcut\n[Collapsed]: https://example.com/collapsed\n[logo]: /favicon.svg\n\n" +
+    "[^note]: Footnote text.\n\n<!-- End. -->\n";
+  const plan = prepareMarkdown(body);
+  assert.equal(plan.separators.length, 5);
+  const response = plan.text
+    .replace("First", "The translated first sentence\nwraps onto another line")
+    .replace(/^(__KEEP_\d+_\d+__)\n\n(?=__KEEP_\d+_\d+__(?:\n|$))/gm, "$1\n");
+  const saved = restoreMarkdown(plan, response);
+  assert.equal(
+    saved,
+    body.replace(
+      "First",
+      "The translated first sentence\nwraps onto another line"
+    )
+  );
+  assert.deepEqual(validateMarkdown(plan, response, saved), []);
+  const require = createRequire(import.meta.url);
+  const astroRequire = createRequire(require.resolve("astro/package.json"));
+  const { createMarkdownProcessor } = await import(
+    pathToFileURL(astroRequire.resolve("@astrojs/markdown-remark")).href
+  );
+  const processor = await createMarkdownProcessor({ syntaxHighlight: false });
+  const { code } = await processor.render(saved);
+  for (const path of ["reference", "shortcut", "collapsed"])
+    assert.ok(code.includes('href="https://example.com/' + path + '"'));
+  assert.equal((code.match(/<img\b/g) ?? []).length, 1);
+  assert.equal((code.match(/<pre\b/g) ?? []).length, 3);
+  assert.equal((code.match(/<br\s*\/?\s*>/g) ?? []).length, 1);
+  assert.ok(code.includes("data-footnotes"));
+  assert.ok(!code.includes("[guide]: https://example.com/reference"));
+});
+
+test("restores only uniquely identified standalone gaps without moving added content", () => {
+  const plan = prepareMarkdown("<!-- A -->\n\n<!-- B -->\n");
+  const [before, after] = plan.protected.map(item => item.token);
+  for (const gap of ["\n", "", " \n \n\n"]) {
+    const response = before + gap + after + "\n";
+    assert.equal(restoreMarkdown(plan, response), plan.body);
+  }
+  for (const [response, code] of [
+    [after + "\n" + before + "\n", "block-separator-unresolved"],
+    [before + "\nNew prose.\n" + after + "\n", "block-separator-unresolved"],
+    [before + "\n__KEEP_9_9__\n" + after + "\n", "block-separator-unresolved"],
+    ["`" + before + "\n" + after + "`\n", "block-separator-unresolved"],
+    ["  " + before + "\n" + after + "\n", "block-separator-unresolved"],
+    [before + "\n" + before + "\n" + after + "\n", "placeholder-duplicate"],
+    [before + "\n", "placeholder-missing"],
+  ]) {
+    const expected = response
+      .replaceAll(before, "<!-- A -->")
+      .replace(after, "<!-- B -->");
+    const saved = restoreMarkdown(plan, response);
+    assert.equal(saved, expected);
+    assert.ok(
+      validateMarkdown(plan, response, saved).some(group =>
+        group.details.some(item => item.code === code)
+      ),
+      response
+    );
+  }
+  const quoted = prepareMarkdown("> <!-- A -->\n>\n> <!-- B -->\n");
+  assert.equal(quoted.separators.length, 0);
+  assert.equal(restoreMarkdown(quoted, quoted.text), quoted.body);
+  const inline = prepareMarkdown("`first`\n\n`second`\n");
+  assert.equal(inline.separators.length, 0);
 });
 
 test("keeps resource boundaries canonical for nested URLs, escaped labels, titles, and Unicode", () => {
