@@ -84,6 +84,39 @@ test("uses argument arrays and stdin, disabling display wrapping and thinking", 
   }
 });
 
+test("uses JSON mode only for metadata and starts an independent process for the body", async t => {
+  const metadata = {
+    id: "en:metadata",
+    format: "json",
+    prompt: "Metadata instructions\nText to translate:\ntitle: Bonjour",
+  };
+  const body = {
+    id: "en:body",
+    prompt: "Body instructions\nText to translate:\nBonjour **monde**.",
+  };
+  const raw = ['{"title":"Hello"}\n', "Hello **world**.\n"];
+  const { run, calls, chunks } = setup(t, ({ args }) => ({
+    text:
+      args[0] === "show"
+        ? "Model info\n"
+        : raw[args.includes("--format") ? 0 : 1],
+  }));
+  assert.deepEqual(await run([metadata, body]), [
+    { id: metadata.id, text: raw[0].trim() },
+    { id: body.id, text: raw[1].trim() },
+  ]);
+  const runs = calls.filter(call => call.args[0] === "run");
+  assert.equal(runs.length, 2);
+  assert.deepEqual(runs[0].args.slice(-2), ["--format", "json"]);
+  assert.ok(!runs[1].args.includes("--format"));
+  assert.equal(runs[0].prompt, metadata.prompt);
+  assert.equal(runs[1].prompt, body.prompt);
+  assert.equal(
+    Buffer.concat(chunks.stdout).toString("utf8"),
+    "Model info\n" + raw[0] + "Model info\n" + raw[1]
+  );
+});
+
 test("does not spawn Ollama when the service is unavailable or returns an error", async t => {
   const { run, calls } = setup(t);
   t.mock.method(globalThis, "fetch", async () => {

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { parse } from "yaml";
 import { parseTranslationArgs } from "../../scripts/content-translation/options.mjs";
 import { runTranslationCommand } from "../../scripts/content-translation/command.mjs";
 import {
@@ -64,33 +65,35 @@ function fixture(t, contents = {}) {
       callback(null, "same\n");
     }
   );
-  const calls = mockOllama(t, ({ args, prompt }) => ({
-    text:
-      args[0] === "show"
-        ? "Model info"
-        : prompt
-            .split("Text to translate:\n")
-            .at(-1)
-            .replaceAll("Bonjour", "Hello")
-            .replaceAll("Outils", "Tools"),
-  }));
+  const calls = mockOllama(t, ({ args, prompt }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    const text = prompt
+      .split("Text to translate:\n")
+      .at(-1)
+      .replaceAll("Bonjour", "Hello")
+      .replaceAll("Outils", "Tools");
+    return {
+      text: args.includes("--format") ? JSON.stringify(parse(text)) : text,
+    };
+  });
   const controller = new AbortController();
   const messages = [];
   const report = message => messages.push(message);
-  const output = captureOllamaOutput().output;
+  const captured = captureOllamaOutput();
   return {
     ...memory,
     calls,
     controller,
     messages,
     report,
+    ...captured,
     run: (input = args) =>
       runTranslationCommand(
         memory.root,
         input,
         report,
         controller.signal,
-        output
+        captured.output
       ),
   };
 }
@@ -166,6 +169,7 @@ test("generates every target before writing drafts and leaves source text unchan
     return originalOpen(...input);
   });
   await run();
+  assert.equal(calls.filter(call => call.args[0] === "run").length, 4);
   assert.equal(
     generatedBeforeWrite,
     calls.filter(call => call.args[0] === "run").length
@@ -295,20 +299,15 @@ test("uses UTF-8 prompt-file content in replace mode and validates from and mode
   assert.deepEqual(clean.calls, []);
 });
 
-test("a failed last target or invalid Markdown result produces no writes", async t => {
-  for (const failure of ["process", "validation"]) {
-    const { run, mutations } = fixture(t);
-    mockOllama(t, ({ args, prompt }) => {
-      if (args[0] === "show") return { text: "Model info" };
-      if (prompt.includes("to ar."))
-        return failure === "process"
-          ? { code: 1, stderr: "failed" }
-          : { text: "Missing protected content" };
-      return { text: prompt.split("Text to translate:\n").at(-1) };
-    });
-    await assert.rejects(run(), /failed|placeholders/);
-    assert.deepEqual(mutations, []);
-  }
+test("a failed last target still produces no writes", async t => {
+  const { run, mutations } = fixture(t);
+  mockOllama(t, ({ args, prompt }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    if (prompt.includes("to ar.")) return { code: 1, stderr: "failed" };
+    return { text: prompt.split("Text to translate:\n").at(-1) };
+  });
+  await assert.rejects(run(), /failed/);
+  assert.deepEqual(mutations, []);
 });
 
 test("retains successful writes and reports failed and pending targets", async t => {

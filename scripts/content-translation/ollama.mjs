@@ -133,7 +133,7 @@ async function invoke(args, prompt, host, signal, output) {
 /**
  * Run prepared translation requests using an installed local model and non-interactive stdin.
  * Keep the service and model unchanged during the run; CLI preflights are not locks.
- * @param {readonly {id: string, prompt: string}[]} requests Kernel-validated model requests.
+ * @param {readonly {id: string, prompt: string, format?: "json"}[]} requests Kernel-validated model requests and optional metadata JSON mode.
  * @param {string} model Model name validated by the translation kernel.
  * @param {(message: string) => void} report Command progress sink, separate from raw model output.
  * @param {AbortSignal} signal Cancellation signal owned by the command.
@@ -165,7 +165,13 @@ export async function runOllamaRequests(
     report(`Translate ${index + 1}/${requests.length}: ${request.id}`);
     // Wrapping or thinking text would contaminate the article returned for validation.
     const text = await invoke(
-      ["run", model, "--nowordwrap", "--hidethinking"],
+      [
+        "run",
+        model,
+        "--nowordwrap",
+        "--hidethinking",
+        ...(request.format === "json" ? ["--format", "json"] : []),
+      ],
       request.prompt,
       host,
       signal,

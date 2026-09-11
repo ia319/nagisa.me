@@ -2,19 +2,23 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseTranslationArgs, TRANSLATION_HELP } from "./options.mjs";
 import { readTranslationSnapshot } from "./snapshot.mjs";
-import { prepareTranslation, completeTranslation } from "./pipeline.mjs";
+import {
+  prepareTranslation,
+  completeTranslation,
+  validateTranslation,
+} from "./pipeline.mjs";
 import { runOllamaRequests } from "./ollama.mjs";
 import { prepareWrites, writeTranslations } from "./write.mjs";
 
 /**
- * Run translation from argument validation through complete-set publication.
+ * Report content checks and write translation drafts.
  * @param {string} root Working directory, expected to be the project root.
  * @param {string[]} args Command arguments after the script name.
  * @param {(message: string) => void} report Help, progress, and diagnostic sink.
  * @param {AbortSignal} signal Cancellation signal shared with process and write boundaries.
  * @param {{stdout: import("node:stream").Writable, stderr: import("node:stream").Writable}} output Destinations for original Ollama output.
  * @returns {Promise<void>} Resolves after help or successful publication.
- * @throws {Error} When arguments, preflight, generation, validation, or publication fails.
+ * @throws {Error} When arguments, preflight, generation, or publication fails.
  */
 export async function runTranslationCommand(
   root,
@@ -39,8 +43,6 @@ export async function runTranslationCommand(
       : await fs.readFile(path.resolve(root, options.promptFile), "utf8");
   const plan = prepareTranslation({ ...snapshot, ...options, userPrompt });
   const writes = await prepareWrites(snapshot.root, plan.outputs);
-  for (const diagnostic of plan.diagnostics)
-    report(`[${diagnostic.code}] ${diagnostic.message}`);
   const responses = await runOllamaRequests(
     plan.requests,
     plan.model,
@@ -49,15 +51,13 @@ export async function runTranslationCommand(
     output
   );
   const result = completeTranslation(plan, responses);
-  for (const diagnostic of result.diagnostics) {
-    if (
-      !plan.diagnostics.some(
-        item =>
-          item.code === diagnostic.code && item.message === diagnostic.message
-      )
-    )
-      report(`[${diagnostic.code}] ${diagnostic.message}`);
+  for (const diagnostic of plan.diagnostics) {
+    report(`[source:${diagnostic.code}] ${diagnostic.message}`);
   }
+  const diagnostics = validateTranslation(plan, responses, result.files);
+  for (const diagnostic of diagnostics)
+    report(`[validation:${diagnostic.code}] ${diagnostic.message}`);
+  report(`Content validation: ${diagnostics.length} issue group(s).`);
   await writeTranslations(writes, result.files, report, signal);
   report(
     `Generated ${result.files.length} draft article(s). Review translations before publication.`

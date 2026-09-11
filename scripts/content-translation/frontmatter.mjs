@@ -4,6 +4,7 @@ import {
   isMap,
   isScalar,
   isSeq,
+  LineCounter,
   parseDocument,
   visit,
 } from "yaml";
@@ -17,7 +18,7 @@ import {
 /**
  * Parse an article snapshot while retaining YAML nodes, comments, and field order.
  * @param {string} source Complete Markdown source supplied by the caller.
- * @returns {{document: import("yaml").Document, body: string, fields: {title: string, description: string, tags: string[]}}} Parsed source without file access.
+ * @returns {{document: import("yaml").Document, body: string, bodyLine: number, fieldPositions: Record<string, {line: number, column: number}>, fields: {title: string, description: string, tags: string[]}}} Parsed source and physical field/body positions without file access.
  * @throws {Error} When frontmatter is malformed or cannot safely preserve field values.
  */
 export function parseArticle(source) {
@@ -25,7 +26,8 @@ export function parseArticle(source) {
   const match = /^---[\t ]*\n([\s\S]*?)^---[\t ]*(?:\n|$)/m.exec(text);
   if (!match || match.index !== 0)
     throw new Error("Article must start with YAML frontmatter");
-  const document = parseDocument(match[1]);
+  const lineCounter = new LineCounter();
+  const document = parseDocument(match[1], { lineCounter });
   if (document.errors.length || document.warnings.length) {
     throw new Error(
       `Invalid frontmatter: ${[...document.errors, ...document.warnings].map(item => item.message).join("; ")}`
@@ -65,9 +67,19 @@ export function parseArticle(source) {
       tags.push(item.value);
     }
   }
+  const fieldPositions = {};
+  for (const pair of document.contents.items) {
+    const point = lineCounter.linePos(pair.key.range[0]);
+    fieldPositions[pair.key.value] = {
+      line: point.line + 1,
+      column: point.col,
+    };
+  }
   return {
     document,
     body: text.slice(match[0].length),
+    bodyLine: match[0].split("\n").length,
+    fieldPositions,
     fields: { title, description, tags },
   };
 }
@@ -75,8 +87,8 @@ export function parseArticle(source) {
 /**
  * Assemble translated fields and Markdown using the shared content contract.
  * @param {ReturnType<typeof parseArticle>} article Source article snapshot.
- * @param {{title: string, description: string, tags: string[]}} fields Validated translated fields.
- * @param {string} body Validated translated Markdown body.
+ * @param {{title: string, description: string, tags: string[]}} fields Translated fields awaiting post-write content review.
+ * @param {string} body Restored Markdown body awaiting post-write content review.
  * @param {{sourceLocale: string, model: string}} provenance Actual translation source and model.
  * @returns {string} Markdown text with LF, no BOM, and a final newline.
  * @throws {Error} When the translated tag count differs from the source.
