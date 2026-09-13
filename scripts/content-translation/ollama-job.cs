@@ -46,6 +46,13 @@ public static class TranslationOllamaJob
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct StartupInfoEx
+    {
+        public StartupInfo Startup;
+        public IntPtr Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct ProcessInfo
     {
         public IntPtr Process, Thread;
@@ -59,17 +66,18 @@ public static class TranslationOllamaJob
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool QueryInformationJobObject(IntPtr job, int kind, out Accounting accounting, uint size, IntPtr returned);
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool TerminateJobObject(IntPtr job, uint code);
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool TerminateProcess(IntPtr process, uint code);
+    private static extern bool InitializeProcThreadAttributeList(IntPtr attributes, uint count, uint flags, ref IntPtr size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool UpdateProcThreadAttribute(IntPtr attributes, uint flags, IntPtr kind,
+        IntPtr value, IntPtr size, IntPtr previous, IntPtr returned);
+    [DllImport("kernel32.dll")]
+    private static extern void DeleteProcThreadAttributeList(IntPtr attributes);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes,
         IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory,
-        ref StartupInfo startup, out ProcessInfo process);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern uint ResumeThread(IntPtr thread);
+        ref StartupInfoEx startup, out ProcessInfo process);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -148,8 +156,9 @@ public static class TranslationOllamaJob
     public static int Run(string executable, int port)
     {
         IntPtr job = IntPtr.Zero, input = IntPtr.Zero, output = IntPtr.Zero;
+        IntPtr attributes = IntPtr.Zero, jobList = IntPtr.Zero, pipeList = IntPtr.Zero;
         ProcessInfo child = new ProcessInfo();
-        bool assigned = false;
+        bool attributesInitialized = false;
         try
         {
             if (port < 1 || port > 65535) throw new ArgumentOutOfRangeException("port");
@@ -169,20 +178,36 @@ public static class TranslationOllamaJob
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot set Ollama job limits");
             input = InheritStandardHandle(-10);
             output = InheritStandardHandle(-12);
-            StartupInfo startup = new StartupInfo();
-            startup.Size = (uint)Marshal.SizeOf(typeof(StartupInfo));
-            startup.Flags = 0x100;
-            startup.Input = input;
-            startup.Output = startup.Error = output;
-            // Suspension closes the create/assign race, including nested-job failures.
+            IntPtr attributeSize = IntPtr.Zero;
+            InitializeProcThreadAttributeList(IntPtr.Zero, 2, 0, ref attributeSize);
+            if (attributeSize == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot size process attributes");
+            attributes = Marshal.AllocHGlobal(attributeSize);
+            if (!InitializeProcThreadAttributeList(attributes, 2, 0, ref attributeSize))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot initialize process attributes");
+            attributesInitialized = true;
+            jobList = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(jobList, job);
+            if (!UpdateProcThreadAttribute(attributes, 0, new IntPtr(0x0002000d), jobList,
+                new IntPtr(IntPtr.Size), IntPtr.Zero, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot set Ollama job at creation (requires Windows 10 or later)");
+            // Only the redirected pipes may be inherited, never unrelated supervisor handles.
+            pipeList = Marshal.AllocHGlobal(2 * IntPtr.Size);
+            Marshal.WriteIntPtr(pipeList, input);
+            Marshal.WriteIntPtr(pipeList, IntPtr.Size, output);
+            if (!UpdateProcThreadAttribute(attributes, 0, new IntPtr(0x00020002), pipeList,
+                new IntPtr(2 * IntPtr.Size), IntPtr.Zero, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot restrict inherited Ollama handles");
+            StartupInfoEx startup = new StartupInfoEx();
+            startup.Startup.Size = (uint)Marshal.SizeOf(typeof(StartupInfoEx));
+            startup.Startup.Flags = 0x100;
+            startup.Startup.Input = input;
+            startup.Startup.Output = startup.Startup.Error = output;
+            startup.Attributes = attributes;
+            // Assign atomically: a supervisor crash must not leave an uncontained child.
             if (!CreateProcess(executable, new StringBuilder("\"" + executable + "\" serve"),
-                IntPtr.Zero, IntPtr.Zero, true, 0x08000004, IntPtr.Zero, null, ref startup, out child))
+                IntPtr.Zero, IntPtr.Zero, true, 0x08080000, IntPtr.Zero, null, ref startup, out child))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot start ollama serve");
-            if (!AssignProcessToJobObject(job, child.Process))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot contain Ollama in its job");
-            assigned = true;
-            if (!control.IsCompleted && ResumeThread(child.Thread) == uint.MaxValue)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume contained Ollama");
             bool listening = false;
             while (!control.IsCompleted)
             {
@@ -214,15 +239,7 @@ public static class TranslationOllamaJob
                 (native == null ? "" : " (Windows error " + native.NativeErrorCode + ")"));
             try
             {
-                // Failed assignment must never allow the suspended executable to run.
-                if (child.Process != IntPtr.Zero && !assigned)
-                {
-                    // Windows can already terminate a process when job assignment fails.
-                    if (WaitForSingleObject(child.Process, 0) != 0 &&
-                        (!TerminateProcess(child.Process, 1) || WaitForSingleObject(child.Process, 5000) != 0))
-                        throw new InvalidOperationException("Cannot confirm suspended-process cleanup");
-                }
-                else if (job != IntPtr.Zero) StopJob(job);
+                if (job != IntPtr.Zero) StopJob(job);
                 Console.WriteLine("{\"event\":\"stopped\"}");
             }
             catch (Exception cleanup) { Console.Error.WriteLine("Ollama cleanup: " + cleanup.Message); }
@@ -230,6 +247,10 @@ public static class TranslationOllamaJob
         }
         finally
         {
+            if (attributesInitialized) DeleteProcThreadAttributeList(attributes);
+            if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
+            if (jobList != IntPtr.Zero) Marshal.FreeHGlobal(jobList);
+            if (pipeList != IntPtr.Zero) Marshal.FreeHGlobal(pipeList);
             if (job != IntPtr.Zero) CloseHandle(job);
             if (child.Thread != IntPtr.Zero) CloseHandle(child.Thread);
             if (child.Process != IntPtr.Zero) CloseHandle(child.Process);
