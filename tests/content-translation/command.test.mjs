@@ -15,6 +15,8 @@ import {
 import { parseArticle } from "../../scripts/content-translation/frontmatter.mjs";
 import { memoryFiles } from "./memory-files.mjs";
 import { captureOllamaOutput, mockOllama } from "./mock-ollama.mjs";
+import { mockOllamaPorts } from "./mock-ollama-ports.mjs";
+import { mockOllamaSupervisor } from "./mock-ollama-supervisor.mjs";
 
 const source =
   "---\ntitle: Bonjour\ndescription: Exemple\ntags: [Outils]\n---\nBonjour `code` et [guide](https://example.com).\n";
@@ -139,6 +141,192 @@ test("parses repeated targets, pnpm separators, model precedence, and prompt opt
     () => parseTranslationArgs(["a.md", "--to", "en"], undefined),
     /--model/
   );
+});
+
+test("parses explicit and automatic service ports and rejects invalid or repeated values", () => {
+  assert.equal(parseTranslationArgs(args).ollamaPort, undefined);
+  for (const port of ["auto", "1", "65535", "22434"])
+    assert.equal(
+      parseTranslationArgs([...args, "--ollama-port", port]).ollamaPort,
+      port === "auto" ? "auto" : Number(port)
+    );
+  for (const port of [
+    "",
+    "0",
+    "65536",
+    "-1",
+    "1.5",
+    "0x1234",
+    "+80",
+    " 80",
+    "NaN",
+    "AUTO",
+  ])
+    assert.throws(
+      () => parseTranslationArgs([...args, "--ollama-port", port]),
+      /ollama-port/
+    );
+  assert.throws(
+    () =>
+      parseTranslationArgs([
+        ...args,
+        "--ollama-port",
+        "auto",
+        "--ollama-port",
+        "22434",
+      ]),
+    /Do not repeat --ollama-port/
+  );
+});
+
+test("starts a private service only for real requests and stops it after saved-draft checks", async t => {
+  const { run, calls, messages, entries, root } = fixture(t);
+  delete process.env.OLLAMA_HOST;
+  const ports = mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t, {
+    stop(call) {
+      assert.match(messages.at(-1), /Generated 2 draft/);
+      assert.ok(entries.has(path.join(root, "src/data/blog/post.en.md")));
+      assert.ok(entries.has(path.join(root, "src/data/blog/post.ar.md")));
+      call.event("stopped");
+      call.close();
+    },
+  });
+  await run();
+  assert.equal(servers.length, 1);
+  assert.equal(servers[0].stops, 1);
+  assert.equal(ports.length, 1);
+  assert.ok(
+    calls.every(
+      call => call.options.env.OLLAMA_HOST === "http://127.0.0.1:42000/"
+    )
+  );
+  assert.equal(process.env.OLLAMA_HOST, undefined);
+});
+
+test("leaves an unavailable external service unmanaged", async t => {
+  const { run, calls } = fixture(t);
+  const ports = mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t);
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("connection refused");
+  });
+  await assert.rejects(run(), /service is unavailable.*Start it manually/);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(ports, []);
+  assert.deepEqual(servers, []);
+});
+
+test("keeps preflight errors and zero-request articles outside the service lifecycle", async t => {
+  const { run, calls } = fixture(t, {
+    "src/data/blog/post.fr.md":
+      "---\ntitle: ''\ndescription: ''\n---\n```text\nKeep this.\n```\n",
+  });
+  delete process.env.OLLAMA_HOST;
+  const ports = mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t);
+  await assert.rejects(run(["missing.md", "--to", "en", "--model", "local"]));
+  await assert.rejects(run([...args, "--to", "fr"]), /source language/);
+  await run([...args, "--ollama-port", "auto"]);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(ports, []);
+  assert.deepEqual(servers, []);
+});
+
+test("stops its service on generation failure and preserves the primary error if cleanup fails", async t => {
+  for (const cleanupFailure of [false, true]) {
+    const { run, entries, root, messages } = fixture(t);
+    mockOllama(t, () => ({ code: 1, stderr: "model not found" }));
+    mockOllamaPorts(t);
+    const servers = mockOllamaSupervisor(t, {
+      stop(call) {
+        if (!cleanupFailure) call.event("stopped");
+        call.close(cleanupFailure ? 1 : 0);
+      },
+    });
+    await assert.rejects(
+      run([...args, "--ollama-port", "22434"]),
+      /model is not installed/
+    );
+    assert.equal(servers[0].stops, 1);
+    assert.equal(
+      entries.has(path.join(root, "src/data/blog/post.en.md")),
+      false
+    );
+    assert.equal(
+      messages.some(message => message.startsWith("[cleanup]")),
+      cleanupFailure
+    );
+  }
+});
+
+test("retains all saved drafts when final service cleanup cannot be confirmed", async t => {
+  const { run, entries, root, messages } = fixture(t);
+  mockOllamaPorts(t);
+  mockOllamaSupervisor(t, {
+    stop(call) {
+      call.close(1);
+    },
+  });
+  await assert.rejects(
+    run([...args, "--ollama-port", "auto"]),
+    /Ollama cleanup failed.*Any saved drafts were kept/s
+  );
+  for (const locale of ["en", "ar"])
+    assert.ok(entries.has(path.join(root, `src/data/blog/post.${locale}.md`)));
+  assert.match(messages.at(-1), /Generated 2 draft/);
+});
+
+test("cancels both model execution and its owned service without writing drafts", async t => {
+  const { run, controller, entries, root } = fixture(t);
+  mockOllama(t, async ({ args }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    controller.abort(new Error("Translation cancelled"));
+    return { text: "Partial response" };
+  });
+  mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t);
+  await assert.rejects(
+    run([...args, "--ollama-port", "auto"]),
+    /Translation cancelled/
+  );
+  assert.equal(servers[0].stops, 1);
+  assert.equal(entries.has(path.join(root, "src/data/blog/post.en.md")), false);
+});
+
+test("does not let force claim an occupied service port", async t => {
+  const { run, calls } = fixture(t);
+  mockOllamaPorts(t, [
+    Object.assign(new Error("occupied"), { code: "EADDRINUSE" }),
+  ]);
+  const servers = mockOllamaSupervisor(t);
+  await assert.rejects(
+    run([...args, "--force", "--ollama-port", "22434"]),
+    /port 22434.*EADDRINUSE/
+  );
+  assert.deepEqual(servers, []);
+  assert.deepEqual(calls, []);
+});
+
+test("stops generation when its service exits without treating it as user cancellation", async t => {
+  const { run, controller, entries, root } = fixture(t);
+  let servers;
+  mockOllama(t, async ({ args }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    servers[0].child.stderr.write("service crashed during generation");
+    servers[0].event("stopped");
+    servers[0].close(1);
+    await new Promise(resolve => setImmediate(resolve));
+    return { text: "Incomplete response" };
+  });
+  mockOllamaPorts(t);
+  servers = mockOllamaSupervisor(t);
+  await assert.rejects(
+    run([...args, "--ollama-port", "auto"]),
+    /service crashed during generation/
+  );
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(entries.has(path.join(root, "src/data/blog/post.en.md")), false);
 });
 
 test("help returns before all filesystem, process, and network access", async t => {
@@ -578,10 +766,13 @@ test("retains successful writes and reports failed and pending targets", async t
     if (to.endsWith("post.ar.md")) throw new Error("Permission denied");
     return originalRename(from, to);
   });
+  mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t);
   await assert.rejects(
-    run([...args, "--to", "ja", "--force"]),
+    run([...args, "--to", "ja", "--force", "--ollama-port", "auto"]),
     /Permission denied/
   );
+  assert.equal(servers[0].stops, 1);
   assert.match(
     entries.get(path.join(root, "src/data/blog/post.en.md")).text,
     /title: Hello/
@@ -746,7 +937,20 @@ test("staged command keeps index language and tag semantics through publication"
       return blobs.find(blob => blob.oid === input[2]).text;
     assert.fail(`Unexpected Git operation: ${input[0]}`);
   });
-  await run(["--staged", "--to", "en", "--model", "example:12b"]);
+  const ports = mockOllamaPorts(t);
+  const servers = mockOllamaSupervisor(t);
+  process.env.OLLAMA_HOST = "https://example.com";
+  await run([
+    "--staged",
+    "--to",
+    "en",
+    "--model",
+    "example:12b",
+    "--ollama-port",
+    "auto",
+  ]);
+  assert.equal(ports.length, 1);
+  assert.equal(servers[0].stops, 1);
   const output = parseArticle(
     entries.get(path.join(root, "src/data/blog/source.en.md")).text
   );

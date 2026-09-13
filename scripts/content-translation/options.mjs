@@ -26,7 +26,7 @@ No automatic staging, commits, model downloads, or service startup commands.
  * Parse the command contract without reading files or contacting Ollama.
  * @param {string[]} args Arguments after the script name, optionally prefixed by pnpm's separator.
  * @param {string | undefined} environmentModel Fallback from OLLAMA_TRANSLATE_MODEL.
- * @returns {{file?: string, staged: boolean, targetLocales: string[], fromLocale?: string, model: string, userPrompt?: string, promptFile?: string, promptMode: "append" | "replace", force: boolean} | null} Explicit options, or null for help.
+ * @returns {{file?: string, staged: boolean, targetLocales: string[], fromLocale?: string, model: string, ollamaPort?: number | "auto", userPrompt?: string, promptFile?: string, promptMode: "append" | "replace", force: boolean} | null} Explicit options, or null for help.
  * @throws {Error} When inputs, targets, model selection, or prompt options conflict.
  */
 export function parseTranslationArgs(args, environmentModel) {
@@ -39,6 +39,7 @@ export function parseTranslationArgs(args, environmentModel) {
       to: { type: "string", multiple: true },
       from: { type: "string" },
       model: { type: "string" },
+      "ollama-port": { type: "string" },
       staged: { type: "boolean" },
       prompt: { type: "string" },
       "prompt-file": { type: "string" },
@@ -65,12 +66,27 @@ export function parseTranslationArgs(args, environmentModel) {
   const model = values.model ?? environmentModel;
   if (!model?.trim())
     throw new Error("Provide --model or set OLLAMA_TRANSLATE_MODEL");
+  const rawPort = values["ollama-port"];
+  if (
+    rawPort !== undefined &&
+    rawPort !== "auto" &&
+    (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535)
+  )
+    throw new Error(
+      "--ollama-port must be auto or a decimal port from 1 to 65535"
+    );
   return {
     file: positionals[0],
     staged: values.staged ?? false,
     targetLocales: values.to,
     fromLocale: values.from,
     model,
+    ollamaPort:
+      rawPort === undefined
+        ? undefined
+        : rawPort === "auto"
+          ? "auto"
+          : Number(rawPort),
     userPrompt: values.prompt,
     promptFile: values["prompt-file"],
     promptMode: values["prompt-mode"],

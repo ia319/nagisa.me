@@ -8,7 +8,7 @@ import {
   validateTranslation,
 } from "./pipeline.mjs";
 import { runOllamaRequests } from "./ollama.mjs";
-import { resolveOllamaHost } from "./ollama-connection.mjs";
+import { openOllamaService } from "./ollama-service.mjs";
 import { prepareWrites, writeTranslations } from "./write.mjs";
 
 /**
@@ -44,58 +44,80 @@ export async function runTranslationCommand(
       : await fs.readFile(path.resolve(root, options.promptFile), "utf8");
   const plan = prepareTranslation({ ...snapshot, ...options, userPrompt });
   const writes = await prepareWrites(snapshot.root, plan.outputs);
-  const responses = plan.requests.length
-    ? await runOllamaRequests(
-        plan.requests,
-        plan.model,
-        resolveOllamaHost(process.env.OLLAMA_HOST?.trim() || "127.0.0.1:11434"),
-        report,
-        signal,
-        output
-      )
-    : [];
-  const result = completeTranslation(plan, responses);
-  report("\n--- Save drafts ---");
-  await writeTranslations(writes, result.files, report, signal);
-  report("\n--- Content checks ---");
-  for (const diagnostic of plan.diagnostics) {
-    const point = diagnostic.source;
-    report(
-      `[source:${diagnostic.code}] src/data/blog/${snapshot.source.path}${point ? `:${plan.article.bodyLine + point.line - 1}:${point.column}` : ""}: ${diagnostic.message}`
-    );
-  }
-  const savedFiles = [];
-  const diagnostics = [];
-  for (const file of result.files) {
+  let service;
+  let failed = false;
+  try {
+    if (plan.requests.length) {
+      service = await openOllamaService(options.ollamaPort, report, signal);
+      signal = service.signal;
+    }
+    const responses = plan.requests.length
+      ? await runOllamaRequests(
+          plan.requests,
+          plan.model,
+          service.host,
+          report,
+          signal,
+          output
+        )
+      : [];
+    const result = completeTranslation(plan, responses);
+    report("\n--- Save drafts ---");
+    await writeTranslations(writes, result.files, report, signal);
+    report("\n--- Content checks ---");
+    for (const diagnostic of plan.diagnostics) {
+      const point = diagnostic.source;
+      report(
+        `[source:${diagnostic.code}] src/data/blog/${snapshot.source.path}${point ? `:${plan.article.bodyLine + point.line - 1}:${point.column}` : ""}: ${diagnostic.message}`
+      );
+    }
+    const savedFiles = [];
+    const diagnostics = [];
+    for (const file of result.files) {
+      try {
+        savedFiles.push({
+          path: file.path,
+          text: await readProjectFile(
+            snapshot.root,
+            path.join("src/data/blog", file.path)
+          ),
+        });
+      } catch (error) {
+        diagnostics.push({
+          code: "read-failed",
+          message: `${file.path}: draft was written, but could not be read for validation: ${error.message}`,
+        });
+      }
+    }
     try {
-      savedFiles.push({
-        path: file.path,
-        text: await readProjectFile(
-          snapshot.root,
-          path.join("src/data/blog", file.path)
-        ),
-      });
+      diagnostics.push(...validateTranslation(plan, responses, savedFiles));
     } catch (error) {
       diagnostics.push({
-        code: "read-failed",
-        message: `${file.path}: draft was written, but could not be read for validation: ${error.message}`,
+        code: "check-failed",
+        message: `Content validation could not finish: ${error.message}. Saved drafts were kept.`,
       });
     }
-  }
-  try {
-    diagnostics.push(...validateTranslation(plan, responses, savedFiles));
+    for (const diagnostic of diagnostics)
+      report(`[validation:${diagnostic.code}] ${diagnostic.message}`);
+    report(
+      `Content validation: ${diagnostics.length} issue group(s). Saved drafts were kept.`
+    );
+    report(
+      `Generated ${result.files.length} draft article(s). Review translations before publication.`
+    );
+    signal.throwIfAborted();
   } catch (error) {
-    diagnostics.push({
-      code: "check-failed",
-      message: `Content validation could not finish: ${error.message}. Saved drafts were kept.`,
-    });
+    failed = true;
+    throw error;
+  } finally {
+    if (service) {
+      try {
+        await service.stop();
+      } catch (error) {
+        const message = `Ollama cleanup failed: ${error.message}. Any saved drafts were kept.`;
+        if (failed) report(`[cleanup] ${message}`);
+        else throw new Error(message, { cause: error });
+      }
+    }
   }
-  for (const diagnostic of diagnostics)
-    report(`[validation:${diagnostic.code}] ${diagnostic.message}`);
-  report(
-    `Content validation: ${diagnostics.length} issue group(s). Saved drafts were kept.`
-  );
-  report(
-    `Generated ${result.files.length} draft article(s). Review translations before publication.`
-  );
 }
