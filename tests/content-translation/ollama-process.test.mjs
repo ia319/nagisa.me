@@ -148,6 +148,20 @@ test("terminates only its supervisor when cleanup exceeds the deadline", async t
   await service.listening;
   await assert.rejects(service.stop(), /cleanup timed out/);
   assert.equal(calls[0].kills, 1);
+  assert.equal(calls[0].unreferenced, true);
+  assert.equal(calls[0].child.stdout.destroyed, true);
+});
+
+test("settles readiness even when a timed-out supervisor cannot exit", async t => {
+  const calls = mockOllamaSupervisor(t, { boot() {}, stop() {} });
+  t.mock.method(timers, "setTimeout", async () => null);
+  const controller = new AbortController();
+  const service = startOllamaProcess(host, controller.signal);
+  calls[0].child.kill = () => false;
+  controller.abort(new Error("Cancelled"));
+  await assert.rejects(service.listening, /cleanup timed out/);
+  await assert.rejects(service.stop(), /cleanup timed out/);
+  assert.equal(calls[0].unreferenced, true);
 });
 
 test("keeps concurrent supervisors and their cleanup independent", async t => {

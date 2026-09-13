@@ -51,6 +51,9 @@ export function mockOllamaSupervisor(t, behavior = {}) {
       call.close(null, "SIGTERM");
       return true;
     };
+    child.unref = () => {
+      call.unreferenced = true;
+    };
     child.stdin.setEncoding("utf8");
     child.stdin.on("data", text => {
       assert.equal(text, "start\n");

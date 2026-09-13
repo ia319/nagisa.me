@@ -156,10 +156,17 @@ export function startOllamaProcess(host, signal) {
           timers.setTimeout(10000, null, { signal: deadline.signal }),
         ]);
         if (outcome === null) {
-          child.kill();
-          throw new Error(
+          const error = new Error(
             "Ollama supervisor cleanup timed out; job-handle closure was requested but cleanup could not be confirmed."
           );
+          rejectListening(error);
+          child.kill();
+          // Release only this failed supervisor's pipes so the command can report failure.
+          child.unref();
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          throw error;
         }
         if (!stopped)
           throw new Error(
