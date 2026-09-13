@@ -217,7 +217,9 @@ public static class TranslationOllamaJob
                 // Failed assignment must never allow the suspended executable to run.
                 if (child.Process != IntPtr.Zero && !assigned)
                 {
-                    if (!TerminateProcess(child.Process, 1) || WaitForSingleObject(child.Process, 5000) != 0)
+                    // Windows can already terminate a process when job assignment fails.
+                    if (WaitForSingleObject(child.Process, 0) != 0 &&
+                        (!TerminateProcess(child.Process, 1) || WaitForSingleObject(child.Process, 5000) != 0))
                         throw new InvalidOperationException("Cannot confirm suspended-process cleanup");
                 }
                 else if (job != IntPtr.Zero) StopJob(job);
