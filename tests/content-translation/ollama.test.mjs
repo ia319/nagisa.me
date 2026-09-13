@@ -20,7 +20,7 @@ function setup(t, response = () => ({ text: "model information" })) {
   const fetches = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     fetches.push({ url, options });
-    return { ok: true };
+    return Response.json({ version: "0.0.0-test" });
   });
   const calls = mockOllama(t, response);
   const messages = [];
@@ -32,10 +32,15 @@ function setup(t, response = () => ({ text: "model information" })) {
     fetches,
     messages,
     controller,
-    run: (items = requests, model = "local model;$(test):12b") =>
+    run: (
+      items = requests,
+      model = "local model;$(test):12b",
+      host = "http://127.0.0.1:11434/"
+    ) =>
       runOllamaRequests(
         items,
         model,
+        host,
         message => messages.push(message),
         controller.signal,
         capture.output
@@ -65,7 +70,9 @@ test("uses argument arrays and stdin, disabling display wrapping and thinking", 
   assert.ok(
     fetches.every(
       call =>
-        call.options.method === "HEAD" && call.options.redirect === "error"
+        call.options.method === "GET" &&
+        call.options.redirect === "error" &&
+        call.url === "http://127.0.0.1:11434/api/version"
     )
   );
   assert.deepEqual(messages, ["Translate 1/1: ar:article"]);
@@ -178,18 +185,30 @@ test("honors cancellation and skips all external work for no requests", async t 
   assert.deepEqual(calls, []);
 });
 
-test("uses one normalized local host for probes and CLI and rejects remote models", async t => {
+test("uses the supplied host for every probe and CLI call without resolving the environment again", async t => {
   const { run, calls, fetches } = setup(t);
-  process.env.OLLAMA_HOST = "0.0.0.0:22434";
-  await run();
-  assert.equal(calls[0].options.env.OLLAMA_HOST, "http://127.0.0.1:22434/");
-  assert.equal(fetches[0].url, calls[0].options.env.OLLAMA_HOST);
   process.env.OLLAMA_HOST = "https://example.com";
-  await assert.rejects(run(), /local Ollama server/);
-  process.env.OLLAMA_HOST = "[::1]:11434";
-  await run();
+  for (const host of ["http://127.0.0.1:22434/", "http://[::1]:33434/"]) {
+    await run(requests, "local:12b", host);
+    for (const call of calls.slice(-2))
+      assert.equal(call.options.env.OLLAMA_HOST, host);
+    for (const probe of fetches.slice(-2))
+      assert.equal(probe.url, new URL("/api/version", host).href);
+  }
+  assert.equal(process.env.OLLAMA_HOST, "https://example.com");
+});
+
+test("rejects remote models on an available local service", async t => {
+  const { run } = setup(t);
   mockOllama(t, () => ({ text: "Model\n    Remote model   example:cloud\n" }));
   await assert.rejects(run(), /Cloud models/);
+});
+
+test("does not invoke the CLI when another service occupies the port", async t => {
+  const { run, calls } = setup(t);
+  t.mock.method(globalThis, "fetch", async () => new Response("OK"));
+  await assert.rejects(run(), /Invalid Ollama version response/);
+  assert.deepEqual(calls, []);
 });
 
 test("rejects empty model information, terminated children, and oversized output", async t => {
@@ -208,7 +227,7 @@ test("does not call run when the service disappears after show", async t => {
   let probes = 0;
   t.mock.method(globalThis, "fetch", async () => {
     if (++probes > 1) throw new Error("connection refused");
-    return { ok: true };
+    return Response.json({ version: "0.0.0-test" });
   });
   await assert.rejects(run(), /service is unavailable/);
   assert.deepEqual(

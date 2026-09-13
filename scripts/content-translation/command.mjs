@@ -8,6 +8,7 @@ import {
   validateTranslation,
 } from "./pipeline.mjs";
 import { runOllamaRequests } from "./ollama.mjs";
+import { resolveOllamaHost } from "./ollama-connection.mjs";
 import { prepareWrites, writeTranslations } from "./write.mjs";
 
 /**
@@ -43,13 +44,16 @@ export async function runTranslationCommand(
       : await fs.readFile(path.resolve(root, options.promptFile), "utf8");
   const plan = prepareTranslation({ ...snapshot, ...options, userPrompt });
   const writes = await prepareWrites(snapshot.root, plan.outputs);
-  const responses = await runOllamaRequests(
-    plan.requests,
-    plan.model,
-    report,
-    signal,
-    output
-  );
+  const responses = plan.requests.length
+    ? await runOllamaRequests(
+        plan.requests,
+        plan.model,
+        resolveOllamaHost(process.env.OLLAMA_HOST?.trim() || "127.0.0.1:11434"),
+        report,
+        signal,
+        output
+      )
+    : [];
   const result = completeTranslation(plan, responses);
   report("\n--- Save drafts ---");
   await writeTranslations(writes, result.files, report, signal);

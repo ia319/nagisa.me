@@ -49,7 +49,9 @@ function fixture(t, contents = {}) {
     if (oldHost === undefined) delete process.env.OLLAMA_HOST;
     else process.env.OLLAMA_HOST = oldHost;
   });
-  t.mock.method(globalThis, "fetch", async () => ({ ok: true }));
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ version: "0.0.0-test" })
+  );
   t.mock.method(
     childProcess,
     "execFile",
@@ -158,6 +160,39 @@ test("help returns before all filesystem, process, and network access", async t 
   assert.ok(messages.every(message => message.startsWith("Usage:")));
 });
 
+test("resolves one service address for all probes and model processes in the command", async t => {
+  const { run, calls } = fixture(t);
+  process.env.OLLAMA_HOST = "0.0.0.0:22434";
+  const probes = [];
+  t.mock.method(globalThis, "fetch", async url => {
+    probes.push(url);
+    process.env.OLLAMA_HOST = "https://example.com";
+    return Response.json({ version: "0.0.0-test" });
+  });
+  await run();
+  assert.equal(probes.length, 8);
+  assert.equal(calls.length, 8);
+  assert.ok(probes.every(url => url === "http://127.0.0.1:22434/api/version"));
+  assert.ok(
+    calls.every(
+      call => call.options.env.OLLAMA_HOST === "http://127.0.0.1:22434/"
+    )
+  );
+  assert.equal(process.env.OLLAMA_HOST, "https://example.com");
+});
+
+test("rejects invalid service addresses before contacting a server or writing drafts", async t => {
+  const { run, calls, entries, root } = fixture(t);
+  process.env.OLLAMA_HOST = "https://example.com";
+  t.mock.method(globalThis, "fetch", () =>
+    assert.fail("Invalid host was used")
+  );
+  await assert.rejects(run(), /local Ollama server/);
+  assert.deepEqual(calls, []);
+  assert.equal(entries.has(path.join(root, "src/data/blog/post.en.md")), false);
+  assert.equal(entries.has(path.join(root, "src/data/blog/post.ar.md")), false);
+});
+
 test("saves every draft before reporting malformed metadata and never retries generation", async t => {
   const { run, root, entries, messages, chunks } = fixture(t);
   const calls = mockOllama(t, ({ args, prompt }) => ({
@@ -257,6 +292,10 @@ test("labels saving and checking correctly when protected-only content needs no 
     "src/data/blog/post.fr.md":
       "---\ntitle: ''\ndescription: ''\n---\n```text\nKeep this.\n```\n",
   });
+  process.env.OLLAMA_HOST = "https://example.com";
+  t.mock.method(globalThis, "fetch", () =>
+    assert.fail("Content without model requests checked the service")
+  );
   await run();
   assert.deepEqual(calls, []);
   assert.equal(messages[0], "\n--- Save drafts ---");

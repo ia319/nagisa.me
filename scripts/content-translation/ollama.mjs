@@ -1,44 +1,6 @@
 import childProcess from "node:child_process";
 import { stripVTControlCharacters } from "node:util";
-
-function localHost() {
-  const raw = process.env.OLLAMA_HOST?.trim() || "127.0.0.1:11434";
-  const explicitScheme = raw.includes("://");
-  const host = new URL(explicitScheme ? raw : `http://${raw}`);
-  if (!explicitScheme && !host.port) host.port = "11434";
-  if (host.hostname === "0.0.0.0") host.hostname = "127.0.0.1";
-  if (host.hostname === "[::]") host.hostname = "[::1]";
-  if (
-    !["http:", "https:"].includes(host.protocol) ||
-    !["localhost", "127.0.0.1", "[::1]"].includes(host.hostname) ||
-    host.username ||
-    host.password ||
-    host.search ||
-    host.hash ||
-    host.pathname !== "/"
-  )
-    throw new Error(
-      "OLLAMA_HOST must identify a local Ollama server without credentials or a URL path"
-    );
-  return host.href;
-}
-
-async function checkService(host, signal) {
-  try {
-    const response = await fetch(host, {
-      method: "HEAD",
-      redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  } catch (error) {
-    signal.throwIfAborted();
-    throw new Error(
-      `Ollama service is unavailable at ${host}. Start it manually, then retry. ${error.message}`,
-      { cause: error }
-    );
-  }
-}
+import { checkOllamaService } from "./ollama-connection.mjs";
 
 async function forwardOutput(source, destination, capture) {
   const onError = error => source.destroy(error);
@@ -135,6 +97,7 @@ async function invoke(args, prompt, host, signal, output) {
  * Keep the service and model unchanged during the run; CLI preflights are not locks.
  * @param {readonly {id: string, prompt: string, format?: "json"}[]} requests Kernel-validated model requests and optional metadata JSON mode.
  * @param {string} model Model name validated by the translation kernel.
+ * @param {string} host Local service URL resolved by the command.
  * @param {(message: string) => void} report Command progress sink, separate from raw model output.
  * @param {AbortSignal} signal Cancellation signal owned by the command.
  * @param {{stdout: import("node:stream").Writable, stderr: import("node:stream").Writable}} output Destinations for original Ollama bytes; the caller retains ownership of both streams.
@@ -144,16 +107,16 @@ async function invoke(args, prompt, host, signal, output) {
 export async function runOllamaRequests(
   requests,
   model,
+  host,
   report,
   signal,
   output
 ) {
   if (!requests.length) return [];
-  const host = localHost();
   const results = [];
   for (const [index, request] of requests.entries()) {
     // Even `show` may start the desktop app when the server is down.
-    await checkService(host, signal);
+    await checkOllamaService(host, signal);
     const info = await invoke(["show", model], "", host, signal, output);
     if (!info)
       throw new Error(`ollama show returned no model information: ${model}`);
@@ -161,7 +124,7 @@ export async function runOllamaRequests(
       throw new Error(
         "Cloud models are outside the local translation boundary; select an installed local model"
       );
-    await checkService(host, signal);
+    await checkOllamaService(host, signal);
     report(`Translate ${index + 1}/${requests.length}: ${request.id}`);
     // Wrapping or thinking text would contaminate the article returned for validation.
     const text = await invoke(
