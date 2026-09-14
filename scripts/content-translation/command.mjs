@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseTranslationArgs, TRANSLATION_HELP } from "./options.mjs";
-import { resolveTranslationSettings } from "./settings.mjs";
+import { readTranslationSettings } from "./settings.mjs";
 import { readTranslationSnapshot, readProjectFile } from "./snapshot.mjs";
 import {
   prepareTranslation,
@@ -35,10 +35,11 @@ export async function runTranslationCommand(
     return;
   }
   signal.throwIfAborted();
-  const settings = resolveTranslationSettings(options, {
+  const settings = await readTranslationSettings(root, options, {
     model: process.env.OLLAMA_TRANSLATE_MODEL,
     host: process.env.OLLAMA_HOST,
   });
+  signal.throwIfAborted();
   const snapshot = await readTranslationSnapshot(root, options);
   const userPrompt =
     options.promptFile === undefined

@@ -46,10 +46,14 @@ function fixture(t, contents = {}) {
     ...contents,
   });
   const oldHost = process.env.OLLAMA_HOST;
+  const oldModel = process.env.OLLAMA_TRANSLATE_MODEL;
+  delete process.env.OLLAMA_TRANSLATE_MODEL;
   process.env.OLLAMA_HOST = "127.0.0.1:11434";
   t.after(() => {
     if (oldHost === undefined) delete process.env.OLLAMA_HOST;
     else process.env.OLLAMA_HOST = oldHost;
+    if (oldModel === undefined) delete process.env.OLLAMA_TRANSLATE_MODEL;
+    else process.env.OLLAMA_TRANSLATE_MODEL = oldModel;
   });
   t.mock.method(globalThis, "fetch", async () =>
     Response.json({ version: "0.0.0-test" })
@@ -176,6 +180,154 @@ test("parses explicit and automatic service ports and rejects invalid or repeate
   );
 });
 
+test("uses configured model and port for every request and records the chosen model", async t => {
+  for (const port of ["auto", 22434]) {
+    const config = `export default ${JSON.stringify({ model: "configured:12b", port })};`;
+    const { run, calls, entries, root, reads, mutations } = fixture(t, {
+      "translation.config.mjs": config,
+    });
+    delete process.env.OLLAMA_HOST;
+    const ports = mockOllamaPorts(t);
+    const servers = mockOllamaSupervisor(t);
+    await run(args.slice(0, -2));
+    assert.equal(ports[0].port, port === "auto" ? 0 : port);
+    assert.equal(servers.length, 1);
+    assert.equal(servers[0].stops, 1);
+    assert.ok(calls.every(call => call.args[1] === "configured:12b"));
+    assert.ok(
+      calls.every(
+        call =>
+          call.options.env.OLLAMA_HOST ===
+          `http://127.0.0.1:${ports[0].selected}/`
+      )
+    );
+    for (const locale of ["en", "ar"]) {
+      const output = parseArticle(
+        entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
+      );
+      assert.equal(
+        output.document.getIn(["translation", "model"]),
+        "configured:12b"
+      );
+    }
+    const configPath = path.join(root, "translation.config.mjs");
+    assert.equal(reads.filter(file => file === configPath).length, 1);
+    assert.equal(entries.get(configPath).text, config);
+    assert.ok(mutations.every(operation => !operation.includes(configPath)));
+    assert.equal(process.env.OLLAMA_HOST, undefined);
+    assert.equal(process.env.OLLAMA_TRANSLATE_MODEL, undefined);
+  }
+});
+
+test("keeps command and environment overrides independent of saved defaults", async t => {
+  for (const selection of ["command-model", "environment", "command-port"]) {
+    const { run, calls, reads, root } = fixture(t, {
+      "translation.config.mjs":
+        'export default { model: "configured:12b", port: 23456 };',
+    });
+    const ports = mockOllamaPorts(t);
+    const servers = mockOllamaSupervisor(t);
+    if (selection === "command-model") {
+      delete process.env.OLLAMA_HOST;
+      await run();
+      assert.equal(ports[0].port, 23456);
+      assert.ok(calls.every(call => call.args[1] === "example:12b"));
+    } else if (selection === "environment") {
+      process.env.OLLAMA_TRANSLATE_MODEL = "environment:12b";
+      await run(args.slice(0, -2));
+      assert.equal(
+        reads.includes(path.join(root, "translation.config.mjs")),
+        false
+      );
+      assert.deepEqual(ports, []);
+      assert.deepEqual(servers, []);
+      assert.ok(calls.every(call => call.args[1] === "environment:12b"));
+      assert.ok(
+        calls.every(
+          call => call.options.env.OLLAMA_HOST === "http://127.0.0.1:11434/"
+        )
+      );
+    } else {
+      process.env.OLLAMA_HOST = "https://example.com";
+      await run([...args.slice(0, -2), "--ollama-port", "auto"]);
+      assert.equal(ports[0].port, 0);
+      assert.ok(calls.every(call => call.args[1] === "configured:12b"));
+      assert.equal(process.env.OLLAMA_HOST, "https://example.com");
+    }
+  }
+});
+
+test("fails invalid or empty configuration before any service, model, or article write", async t => {
+  for (const config of [
+    "export default {};",
+    'export default { model: 12, port: "auto" };',
+    'export default { model: "local", port: 0 };',
+    'export default { model: " local ", port: "auto" };',
+  ]) {
+    const { run, mutations, calls } = fixture(t, {
+      "translation.config.mjs": config,
+    });
+    delete process.env.OLLAMA_HOST;
+    const ports = mockOllamaPorts(t);
+    const servers = mockOllamaSupervisor(t);
+    await assert.rejects(run(args.slice(0, -2)), /model|Model|port/);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(ports, []);
+    assert.deepEqual(servers, []);
+    assert.deepEqual(mutations, []);
+  }
+});
+
+test("does not claim an occupied configured port or fall back from a missing selected model", async t => {
+  for (const failure of ["port", "model"]) {
+    const { run, mutations } = fixture(t, {
+      "translation.config.mjs":
+        'export default { model: "configured:12b", port: 22434 };',
+    });
+    delete process.env.OLLAMA_HOST;
+    const ports = mockOllamaPorts(
+      t,
+      failure === "port"
+        ? [Object.assign(new Error("occupied"), { code: "EADDRINUSE" })]
+        : []
+    );
+    const calls = mockOllama(t, () => ({ code: 1, stderr: "model not found" }));
+    const servers = mockOllamaSupervisor(t);
+    await assert.rejects(
+      run(args.slice(0, -2)),
+      failure === "port" ? /port 22434.*EADDRINUSE/ : /model is not installed/
+    );
+    assert.equal(ports.length, 1);
+    if (failure === "port") {
+      assert.deepEqual(servers, []);
+      assert.deepEqual(calls, []);
+    } else {
+      assert.equal(servers[0].stops, 1);
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].args, ["show", "configured:12b"]);
+    }
+    assert.deepEqual(mutations, []);
+  }
+});
+
+test("cancels configured service execution without changing articles or configuration", async t => {
+  const { run, controller, mutations } = fixture(t, {
+    "translation.config.mjs":
+      'export default { model: "configured:12b", port: "auto" };',
+  });
+  delete process.env.OLLAMA_HOST;
+  mockOllamaPorts(t);
+  mockOllama(t, ({ args }) => {
+    if (args[0] === "show") return { text: "Model info" };
+    controller.abort(new Error("Translation cancelled"));
+    return { hang: true };
+  });
+  const servers = mockOllamaSupervisor(t);
+  await assert.rejects(run(args.slice(0, -2)), /Translation cancelled/);
+  assert.equal(servers[0].stops, 1);
+  assert.deepEqual(mutations, []);
+});
+
 test("starts a private service only for real requests and stops it after saved-draft checks", async t => {
   const { run, calls, messages, entries, root } = fixture(t);
   delete process.env.OLLAMA_HOST;
@@ -216,6 +368,8 @@ test("leaves an unavailable external service unmanaged", async t => {
 
 test("keeps preflight errors and zero-request articles outside the service lifecycle", async t => {
   const { run, calls } = fixture(t, {
+    "translation.config.mjs":
+      'export default { model: "configured:12b", port: 22434 };',
     "src/data/blog/post.fr.md":
       "---\ntitle: ''\ndescription: ''\n---\n```text\nKeep this.\n```\n",
   });
@@ -224,7 +378,7 @@ test("keeps preflight errors and zero-request articles outside the service lifec
   const servers = mockOllamaSupervisor(t);
   await assert.rejects(run(["missing.md", "--to", "en", "--model", "local"]));
   await assert.rejects(run([...args, "--to", "fr"]), /source language/);
-  await run([...args, "--ollama-port", "auto"]);
+  await run(args.slice(0, -2));
   assert.deepEqual(calls, []);
   assert.deepEqual(ports, []);
   assert.deepEqual(servers, []);
@@ -901,8 +1055,10 @@ test("CLI exposes help and rejects invalid arguments without creating files", as
   );
 });
 
-test("staged command keeps index language and tag semantics through publication", async t => {
-  const { run, root, entries, calls } = fixture(t, {
+test("staged command uses working-tree runtime settings with index language and tag semantics", async t => {
+  const { run, root, entries, calls, reads } = fixture(t, {
+    "translation.config.mjs":
+      'export default { model: "working-tree:12b", port: 22434 };',
     "locales.config.mjs": "Unstaged configuration must not be executed",
     "src/data/blog/source.md": "Unstaged source must remain unchanged",
     "src/data/blog/ref.en.md": "Unstaged reference must not be parsed",
@@ -936,22 +1092,25 @@ test("staged command keeps index language and tag semantics through publication"
   });
   const ports = mockOllamaPorts(t);
   const servers = mockOllamaSupervisor(t);
-  process.env.OLLAMA_HOST = "https://example.com";
-  await run([
-    "--staged",
-    "--to",
-    "en",
-    "--model",
-    "example:12b",
-    "--ollama-port",
-    "auto",
-  ]);
+  delete process.env.OLLAMA_HOST;
+  await run(["--staged", "--to", "en"]);
   assert.equal(ports.length, 1);
+  assert.equal(ports[0].port, 22434);
+  assert.equal(
+    reads.filter(file => file === path.join(root, "translation.config.mjs"))
+      .length,
+    1
+  );
+  assert.ok(calls.every(call => call.args[1] === "working-tree:12b"));
   assert.equal(servers[0].stops, 1);
   const output = parseArticle(
     entries.get(path.join(root, "src/data/blog/source.en.md")).text
   );
   assert.equal(output.document.getIn(["translation", "sourceLocale"]), "fr");
+  assert.equal(
+    output.document.getIn(["translation", "model"]),
+    "working-tree:12b"
+  );
   assert.deepEqual(output.fields.tags, ["Tools"]);
   assert.ok(
     calls
