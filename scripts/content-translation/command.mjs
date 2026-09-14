@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseTranslationArgs, TRANSLATION_HELP } from "./options.mjs";
+import { resolveTranslationSettings } from "./settings.mjs";
 import { readTranslationSnapshot, readProjectFile } from "./snapshot.mjs";
 import {
   prepareTranslation,
@@ -28,27 +29,33 @@ export async function runTranslationCommand(
   signal,
   output
 ) {
-  const options = parseTranslationArgs(
-    args,
-    process.env.OLLAMA_TRANSLATE_MODEL
-  );
+  const options = parseTranslationArgs(args);
   if (options === null) {
     report(TRANSLATION_HELP);
     return;
   }
   signal.throwIfAborted();
+  const settings = resolveTranslationSettings(options, {
+    model: process.env.OLLAMA_TRANSLATE_MODEL,
+    host: process.env.OLLAMA_HOST,
+  });
   const snapshot = await readTranslationSnapshot(root, options);
   const userPrompt =
     options.promptFile === undefined
       ? options.userPrompt
       : await fs.readFile(path.resolve(root, options.promptFile), "utf8");
-  const plan = prepareTranslation({ ...snapshot, ...options, userPrompt });
+  const plan = prepareTranslation({
+    ...snapshot,
+    ...options,
+    model: settings.model,
+    userPrompt,
+  });
   const writes = await prepareWrites(snapshot.root, plan.outputs);
   let service;
   let failed = false;
   try {
     if (plan.requests.length) {
-      service = await openOllamaService(options.ollamaPort, report, signal);
+      service = await openOllamaService(settings.service, report, signal);
       signal = service.signal;
     }
     const responses = plan.requests.length

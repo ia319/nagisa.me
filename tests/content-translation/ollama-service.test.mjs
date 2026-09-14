@@ -24,26 +24,27 @@ function setup(t, behavior = {}, outcomes = []) {
     calls,
     controller,
     messages,
-    open: port =>
+    open: (port = "auto") =>
       openOllamaService(
-        port,
+        typeof port === "object" ? port : { port },
         message => messages.push(message),
         controller.signal
       ),
   };
 }
 
-test("borrows OLLAMA_HOST without reserving ports or owning its process", async t => {
+test("borrows an explicit host without reserving ports or owning its process", async t => {
   const { open, calls, ports, controller } = setup(t);
-  process.env.OLLAMA_HOST = "0.0.0.0:22434";
-  const service = await open();
+  const service = await open({ host: "0.0.0.0:22434" });
   assert.equal(service.host, "http://127.0.0.1:22434/");
   assert.equal(service.signal, controller.signal);
   await service.stop();
   assert.deepEqual(calls, []);
   assert.deepEqual(ports, []);
-  process.env.OLLAMA_HOST = "https://example.com";
-  await assert.rejects(open(), /local Ollama server/);
+  await assert.rejects(
+    open({ host: "https://example.com" }),
+    /local Ollama server/
+  );
 });
 
 test("uses private automatic or explicit ports and overrides inherited host configuration", async t => {

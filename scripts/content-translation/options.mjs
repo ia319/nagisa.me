@@ -25,11 +25,10 @@ No automatic staging, commits, model downloads, or service startup commands.
 /**
  * Parse the command contract without reading files or contacting Ollama.
  * @param {string[]} args Arguments after the script name, optionally prefixed by pnpm's separator.
- * @param {string | undefined} environmentModel Fallback from OLLAMA_TRANSLATE_MODEL.
- * @returns {{file?: string, staged: boolean, targetLocales: string[], fromLocale?: string, model: string, ollamaPort?: number | "auto", userPrompt?: string, promptFile?: string, promptMode: "append" | "replace", force: boolean} | null} Explicit options, or null for help.
+ * @returns {{file?: string, staged: boolean, targetLocales: string[], fromLocale?: string, model?: string, ollamaPort?: number | "auto", userPrompt?: string, promptFile?: string, promptMode: "append" | "replace", force: boolean} | null} Explicit options, or null for help.
  * @throws {Error} When inputs, targets, model selection, or prompt options conflict.
  */
-export function parseTranslationArgs(args, environmentModel) {
+export function parseTranslationArgs(args) {
   if (args[0] === "--") args = args.slice(1);
   const { values, positionals, tokens } = parseArgs({
     args,
@@ -63,9 +62,8 @@ export function parseTranslationArgs(args, environmentModel) {
     throw new Error("--prompt and --prompt-file are mutually exclusive");
   if (values["prompt-mode"] !== "append" && values["prompt-mode"] !== "replace")
     throw new Error("--prompt-mode must be append or replace");
-  const model = values.model ?? environmentModel;
-  if (!model?.trim())
-    throw new Error("Provide --model or set OLLAMA_TRANSLATE_MODEL");
+  if (values.model !== undefined && !values.model.trim())
+    throw new Error("--model must not be empty");
   const rawPort = values["ollama-port"];
   if (
     rawPort !== undefined &&
@@ -80,7 +78,7 @@ export function parseTranslationArgs(args, environmentModel) {
     staged: values.staged ?? false,
     targetLocales: values.to,
     fromLocale: values.from,
-    model,
+    model: values.model,
     ollamaPort:
       rawPort === undefined
         ? undefined

@@ -102,28 +102,25 @@ function fixture(t, contents = {}) {
   };
 }
 
-test("parses repeated targets, pnpm separators, model precedence, and prompt options", () => {
-  const result = parseTranslationArgs(
-    [
-      "--",
-      ...args,
-      "--from",
-      "fr",
-      "--prompt",
-      "Use formal terms",
-      "--prompt-mode",
-      "replace",
-      "--force",
-    ],
-    "fallback"
-  );
+test("parses explicit targets, model, pnpm separators, and prompt options", () => {
+  const result = parseTranslationArgs([
+    "--",
+    ...args,
+    "--from",
+    "fr",
+    "--prompt",
+    "Use formal terms",
+    "--prompt-mode",
+    "replace",
+    "--force",
+  ]);
   assert.equal(result.model, "example:12b");
   assert.deepEqual(result.targetLocales, ["en", "ar"]);
   assert.equal(result.promptMode, "replace");
   assert.equal(result.force, true);
   assert.equal(
-    parseTranslationArgs(["--staged", "--to", "en"], "fallback").model,
-    "fallback"
+    parseTranslationArgs(["--staged", "--to", "en"]).model,
+    undefined
   );
   for (const invalid of [
     ["--to", "en"],
@@ -136,9 +133,9 @@ test("parses repeated targets, pnpm separators, model precedence, and prompt opt
     ["a.md", "--to", "en", "--prompt-mode", "other"],
     ["a.md", "--to", "en", "--model", "a", "--model", "b"],
   ])
-    assert.throws(() => parseTranslationArgs(invalid, "fallback"));
+    assert.throws(() => parseTranslationArgs(invalid));
   assert.throws(
-    () => parseTranslationArgs(["a.md", "--to", "en"], undefined),
+    () => parseTranslationArgs(["a.md", "--to", "en", "--model", ""]),
     /--model/
   );
 });

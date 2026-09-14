@@ -41,18 +41,22 @@ async function reserveCandidate(port, signal) {
 
 /**
  * Borrow an explicitly configured service or start one private, bounded-lifetime instance.
- * @param {number | "auto" | undefined} port Parsed CLI selection; undefined permits OLLAMA_HOST.
+ * @param {{port: number | "auto", host?: never} | {host: string, port?: never}} selection Resolved private port or borrowed service address.
  * @param {(message: string) => void} report Progress and retry sink, separate from model bytes.
  * @param {AbortSignal} signal Command cancellation signal.
  * @returns {Promise<{host: string, signal: AbortSignal, stop: () => Promise<void>}>} Service address, crash-aware signal, and ownership-safe cleanup.
  * @throws {Error} When the endpoint, port, readiness, or containment cannot be established.
  */
-export async function openOllamaService(port, report, signal) {
+export async function openOllamaService(selection, report, signal) {
   signal.throwIfAborted();
-  const external = process.env.OLLAMA_HOST?.trim();
-  if (port === undefined && external)
-    return { host: resolveOllamaHost(external), signal, stop: async () => {} };
-  const automatic = port === undefined || port === "auto";
+  if (selection.host !== undefined)
+    return {
+      host: resolveOllamaHost(selection.host),
+      signal,
+      stop: async () => {},
+    };
+  const port = selection.port;
+  const automatic = port === "auto";
   const startup = new AbortController();
   const deadline = new AbortController();
   const startupSignal = AbortSignal.any([signal, startup.signal]);
