@@ -1,24 +1,30 @@
 Astro site starter.
 
-## Feature Changes
+Commands below require Node.js and pnpm and run from the project root.
 
-Review the following feature changes from the upstream project:
+## Features
 
 ### Post Directory Tree
 
-Post directory tree renders blog posts by their source directory structure and keeps localized directory labels aligned with available intro content.
+The tree follows the directory structure under `src/data/blog/`. Each directory
+has independent controls for posts and subdirectories beyond the initial limits.
+Directory intro posts appear first and do not count toward the post limit.
 
-- Read nested directory structures under `src/data/blog`.
-- Pin `README.md` as the directory intro post.
-- Resolve directory labels from the current locale intro title, then the default locale intro title, then the folder name.
-- Treat files without locale suffixes as `DEFAULT_LOCALE` posts and intro posts.
-- Limit the initial number of direct child directories and direct posts per directory through config.
-- Collapse overflow directories and posts behind disclosure controls.
-- Collapse and expand each directory independently.
-- Filter posts by current locale by default, and enable default locale post fallback through config.
-- Route fallback posts to their real source locale paths.
-- Resolve post locale and route from the blog-relative source path.
-- Generate post links as root-absolute paths to avoid duplicate locale prefixes in nested routes.
+By default, `README.md` and its language variants in each article directory are
+directory intro posts. Directory names use the first available value:
+
+1. The opening YAML `title` of the intro matching the page's language.
+2. The `title` of the default-language intro (`defaultLocale` in
+   `locales.config.mjs`).
+3. The folder name.
+
+`directoryLabelFallback: "none"` skips the second step.
+`directoryIntroFileName` sets the intro's base filename, without extension or
+language suffix.
+
+Posts appear in the page's language by default.
+`postLocaleFallback: "default-locale"` fills missing versions with
+default-language posts, retaining their source-language routes.
 
 Default config in `src/config.ts`:
 
@@ -28,69 +34,245 @@ export const SITE = {
     maxSubdirectoriesPerDirectory: 6,
     maxPostsPerDirectory: 4,
     directoryIntroFileName: "README",
-    directoryLabelFallback: "default-locale", // "default-locale" | "none"
-    postLocaleFallback: "none", // "none" | "default-locale"
+    directoryLabelFallback: "default-locale",
+    postLocaleFallback: "none",
   },
 };
 ```
 
 ### Language Routing And Switching
 
-Language routing and switching renders locale-prefixed pages, detects post locales from source filenames, and provides language navigation across available translations.
+Each language has pages under `/<locale>/`. The header language switcher links
+article translations; missing translations lead to the target language's post
+list.
 
-- Use `/zh/` and `/en/` as language page prefixes.
-- Provide a language switcher in the header with the existing icon component system.
-- Generate language links from available post translations on post detail pages, and fall back to the target locale post list when a translation is missing.
-- Route the root path `/` on Vercel by `preferred_locale` cookie, browser `Accept-Language`, then default locale order.
-- Keep the root path `/` unchanged on Vercel through internal routing to the matching locale homepage.
-- Store the `preferred_locale` cookie after language selection.
-- Render the default locale homepage at `/` in local and non-Vercel environments.
+Blog and page content share these filename rules:
 
-Language config in `src/i18n/config.ts`:
+- Files without a language suffix belong to the default language.
+  `.<locale>.md` suffixes identify any configured language, including the default.
+- The content-relative path without the language suffix pairs translations.
+- Unconfigured dotted suffixes remain part of the filename.
 
-```ts
-export const DEFAULT_LOCALE = "zh";
+Duplicate language versions and base paths that differ only by case stop the
+build.
 
-export const SUPPORTED_LOCALES = ["zh", "en"] as const;
+#### Language Configuration
+
+Default configuration in `locales.config.mjs`:
+
+```js
+const localeRegistry = /** @type {const} */ ({
+  defaultLocale: "zh",
+  locales: {
+    zh: {
+      label: "中文",
+      dir: "ltr",
+    },
+    en: {
+      label: "English",
+      dir: "ltr",
+    },
+  },
+});
+
+export default localeRegistry;
 ```
+
+- `defaultLocale`: default language.
+- `locales`: supported languages, each with a display name (`label`) and text
+  direction (`dir`, either `"ltr"` or `"rtl"`). Language codes use canonical
+  BCP 47 form.
+
+Each language also requires a complete dictionary in
+`src/i18n/ui-dictionaries.mjs`.
+
+Route synchronization and validation after configuration edits:
+
+```sh
+pnpm locales:generate
+pnpm locales:check
+```
+
+Synchronization updates language routes in `vercel.json`, preserving other
+settings. Production builds also check the language configuration and routes.
+
+#### Root Language Selection
+
+On Vercel, `/` selects a language in this order:
+
+1. A configured language in the `preferred_locale` cookie.
+2. A match at the start of `Accept-Language`, with more specific configured
+   language codes first.
+3. The default language.
+
+Later header entries and quality weights are ignored. Language selection stores
+the cookie for one year; clearing or expiring it restores header-based selection.
+Vercel keeps `/` in the browser address. Other environments show the
+default-language homepage.
+
+#### Change the Default Locale
+
+```text
+pnpm locales:set-default <locale>
+```
+
+The command updates the default language, adds original-language suffixes to
+unsuffixed blog and page files, and synchronizes deployment routes. File contents
+remain unchanged.
+
+Avoid concurrent content or configuration edits. Preflight failures leave files
+unchanged; write failures retain completed changes and report a retry command.
+After a manual or partial switch, `--from <locale>` identifies the original
+language of remaining unsuffixed files.
 
 #### Localized Page Content
 
-Localized page content renders page-level Markdown from `src/data/pages` with locale-aware lookup and default-locale fallback.
+Page Markdown lives under `src/data/pages/`:
 
-- Store page-level Markdown content in `src/data/pages`.
-- Use `src/data/pages/home-intro.md` for homepage intro content.
-- Use `src/data/pages/about.md` for About page content.
-- Mark localized page content with filename suffixes such as `src/data/pages/home-intro.en.md` and `src/data/pages/about.en.md`.
-- Treat files without locale suffixes as `DEFAULT_LOCALE` content.
-- Read page titles from the Markdown frontmatter `title` field.
-- Read page descriptions from the Markdown frontmatter `description` field.
-- Use About page frontmatter for page title, SEO description, and share metadata.
-- Support Markdown headings, body content, lists, and links in homepage intro content.
-- Use localized About content instead of the legacy root About Markdown entry.
+- Homepage intro: `home-intro.md`.
+- About page: `about.md`.
+
+Content lookup prefers the page's language, then the default language. Conflict
+checks cover the entire page collection, including unused content.
+
+Frontmatter `title` and `description` supply page titles and descriptions;
+About also uses them for SEO and sharing. The homepage intro supports Markdown.
+
+#### Article Translation
+
+`pnpm content:translate` uses a local Ollama model to create draft translations
+of one Markdown article under `src/data/blog/`.
+
+Requirements:
+
+- Ollama on `PATH` and an installed local model.
+- Configured source and target languages.
+
+Translation covers `title`, `description`, `tags`, and the body. Drafts have
+`draft: true`, omit `canonicalURL`, and record translation attribution. Other
+frontmatter stays local and is preserved without being sent to the model.
+
+##### Translation Configuration
+
+Default configuration in `translation.config.mjs` at the project root:
+
+```js
+export default {
+  model: "",
+  port: "auto",
+};
+```
+
+- `model`: local model name.
+- `port`: `"auto"` or an integer from `1` to `65535`, not a numeric string.
+
+Missing files or fields use these defaults. Priority, highest first:
+
+- Model: `--model` → `OLLAMA_TRANSLATE_MODEL` → configuration `model`.
+- Service: `--ollama-port` → `OLLAMA_HOST` → configuration `port` → `auto`.
+
+Empty or whitespace-only environment values and configuration model values are
+unset. A model is required; an unavailable selected model has no fallback.
+Command options leave the configuration unchanged. Translation configuration
+always comes from the working tree, including with `--staged`.
+
+##### Usage
+
+```text
+pnpm content:translate -- <file> --to <locale> [options]
+```
+
+`--to` is repeatable for distinct target languages, each different from the
+source language.
+
+`--staged` replaces the file path and requires exactly one added, modified, or
+renamed article in the Git index. The source, tracked reference articles, and
+language configuration come from the index; output conflict checks still use
+the working tree.
+
+**Ollama service**
+
+- A selected port starts a private local service when model requests are needed.
+  The command stops that service after completion, failure, or cancellation.
+  Automatic startup requires Windows 10 or later and `powershell.exe` with
+  `Add-Type` and child-process creation allowed.
+- A selected `OLLAMA_HOST` connects to an existing local service without starting
+  or stopping it. Other platforms require this mode. Remote services and cloud
+  models are unsupported.
+
+Complete options, custom prompts, and runtime limits:
+
+```sh
+pnpm content:translate -- --help
+```
+
+##### Drafts And Content Checks
+
+1. All model responses are collected.
+2. Drafts are saved in the source article's directory.
+3. Saved files are checked for content issues.
+
+New files use `<name>.<locale>.md`, or `<name>.md` for the default language.
+Existing targets retain their filenames. Output uses UTF-8 without BOM and LF
+line endings.
+
+- Existing targets require `--force` for replacement. Different or unverifiable
+  file ownership prevents replacement.
+- The source stays unchanged. Translation does not stage files or create commits.
+- Code and link destinations are protected locally. Content checks report
+  metadata and Markdown issues while retaining saved drafts.
+- Write failures or Ctrl+C retain completed files and report unfinished targets
+  and retained temporary files.
+
+Review drafts before publication and temporary files before removing them.
+
+**Translation attribution**
+
+Generated frontmatter records `sourceLocale`, `provider` (`ollama`), and `model`
+under `translation`.
+
+The source language and model appear below the body. A source link appears when
+the source article exists, is not a draft, and differs from the translation.
+Attribution is author-editable; model names are public.
+
+**Tag relationships**
+
+Matching tag positions in a translation and its declared source establish
+relationships. Counts and order must stay aligned. Unique existing translations
+are reused; other tags are sent to the model.
+
+Public tag pages link unique, reachable tag translations through the language
+switcher. Other results lead to the target language's tag list.
+
+**Verification**
+
+```sh
+pnpm test:content-translate
+```
+
+Tests use in-memory data without writing articles or starting Ollama.
 
 ### Content Git Metadata
 
-Content Git metadata displays Git-based provenance after Markdown content, including the first committed time, the edited time, and the related commit hash. Build output reads a committed manifest instead of executing Git commands during Vercel builds.
+Optional Git metadata appears below blog and page content, with first-commit
+and edited times and commit hashes. Matching first and latest commits omit the
+edited time; missing data uses a localized unknown label. SHA-1 and SHA-256
+hashes are supported.
 
-- Render metadata after blog post content and localized page content.
-- Show the first committed time for each Markdown file.
-- Show the edited time only when the latest content commit differs from the first content commit.
-- Link rendered hashes to repository commits when `SITE.repository` is set.
-- Show `Unknown` when the manifest has no reliable entry for the content file.
-- Normalize repository URLs without a protocol to `https://`.
-- Accept SHA-1 and SHA-256 commit hashes.
-- Read only relative content paths from `src/generated/contentGitMetaManifest.json`.
-- Skip manifest loading when `SITE.contentGitMeta.enabled` is `false`.
+- `SITE.contentGitMeta.enabled`: controls metadata display.
+- `SITE.repository`: repository address for commit links. Empty values leave
+  hashes unlinked; omitted protocols default to `https://`.
+
+Metadata comes from the committed `src/generated/contentGitMetaManifest.json`.
 
 #### Usage
 
-1. Commit content changes.
-2. Run the manifest generator in a full local Git clone.
+1. Commit content changes, including renames.
+2. Generate the manifest in a full local Git clone:
 
-```sh
-pnpm content:git-meta
-```
+   ```sh
+   pnpm content:git-meta
+   ```
 
 3. Commit `src/generated/contentGitMetaManifest.json` separately.
 
@@ -98,15 +280,15 @@ Default config in `src/config.ts`:
 
 ```ts
 export const SITE = {
-  repository: "", // repository root URL, e.g. "https://github.com/owner/repo"
+  repository: "",
   contentGitMeta: {
-    enabled: false, // show content Git metadata from src/generated/contentGitMetaManifest.json
+    enabled: false,
   },
 };
 ```
 
 ### Build Compatibility
 
-Build compatibility keeps generated search assets portable across local and Windows builds.
-
-- Copy Pagefind output with a cross-platform command to support Windows builds.
+`pnpm build` generates Pagefind search assets in `dist/pagefind/` and copies them
+to `public/pagefind/` for development, on Windows and POSIX. Local search reflects
+the last production build.
