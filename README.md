@@ -19,8 +19,6 @@ directory intro posts. Directory names use the first available value:
 3. The folder name.
 
 `directoryLabelFallback: "none"` skips the second step.
-`directoryIntroFileName` sets the intro's base filename, without extension or
-language suffix.
 
 Posts appear in the page's language by default.
 `postLocaleFallback: "default-locale"` fills missing versions with
@@ -31,11 +29,11 @@ Default config in `src/config.ts`:
 ```ts
 export const SITE = {
   postsTree: {
-    maxSubdirectoriesPerDirectory: 6,
-    maxPostsPerDirectory: 4,
-    directoryIntroFileName: "README",
-    directoryLabelFallback: "default-locale",
-    postLocaleFallback: "none",
+    maxSubdirectoriesPerDirectory: 6, // initial subdirectory limit; default: 6; values: number
+    maxPostsPerDirectory: 4, // initial post limit, excluding intro; default: 4; values: number
+    directoryIntroFileName: "README", // directory intro filename; default: "README"; values: filename without extension or locale suffix
+    directoryLabelFallback: "default-locale", // directory label fallback; default: "default-locale"; values: "default-locale" | "none"
+    postLocaleFallback: "none", // missing post translation fallback; default: "none"; values: "none" | "default-locale"
   },
 };
 ```
@@ -62,15 +60,15 @@ Default configuration in `locales.config.mjs`:
 
 ```js
 const localeRegistry = /** @type {const} */ ({
-  defaultLocale: "zh",
-  locales: {
+  defaultLocale: "zh", // default language; default: "zh"; values: a key in locales
+  locales: /* supported languages; default: zh, en; values: non-empty map */ {
     zh: {
-      label: "中文",
-      dir: "ltr",
+      label: "中文", // display name; default: "中文"; values: non-empty string
+      dir: "ltr", // text direction; default: "ltr"; values: "ltr" (left-to-right) | "rtl" (right-to-left)
     },
     en: {
-      label: "English",
-      dir: "ltr",
+      label: "English", // display name; default: "English"; values: non-empty string
+      dir: "ltr", // text direction; default: "ltr"; values: "ltr" | "rtl"
     },
   },
 });
@@ -78,13 +76,8 @@ const localeRegistry = /** @type {const} */ ({
 export default localeRegistry;
 ```
 
-- `defaultLocale`: default language.
-- `locales`: supported languages, each with a display name (`label`) and text
-  direction (`dir`, either `"ltr"` or `"rtl"`). Language codes use canonical
-  BCP 47 form.
-
-Each language also requires a complete dictionary in
-`src/i18n/ui-dictionaries.mjs`.
+Language codes use canonical BCP 47 form. Each language requires a complete
+dictionary in `src/i18n/ui-dictionaries.mjs`.
 
 Route synchronization and validation after configuration edits:
 
@@ -158,13 +151,10 @@ Default configuration in `translation.config.mjs` at the project root:
 
 ```js
 export default {
-  model: "",
-  port: "auto",
+  model: "", // local Ollama model; default: "" (unset); values: model name string
+  port: "auto", // Ollama service port; default: "auto"; values: "auto" | integer 1-65535 (not a numeric string)
 };
 ```
-
-- `model`: local model name.
-- `port`: `"auto"` or an integer from `1` to `65535`, not a numeric string.
 
 Missing files or fields use these defaults. Priority, highest first:
 
@@ -259,10 +249,6 @@ and edited times and commit hashes. Matching first and latest commits omit the
 edited time; missing data uses a localized unknown label. SHA-1 and SHA-256
 hashes are supported.
 
-- `SITE.contentGitMeta.enabled`: controls metadata display.
-- `SITE.repository`: repository address for commit links. Empty values leave
-  hashes unlinked; omitted protocols default to `https://`.
-
 Metadata comes from the committed `src/generated/contentGitMetaManifest.json`.
 
 #### Usage
@@ -280,9 +266,9 @@ Default config in `src/config.ts`:
 
 ```ts
 export const SITE = {
-  repository: "",
+  repository: "", // repository root URL for commit links; default: "" (unlinked hashes); values: "" or HTTP(S) URL; omitted protocol: https://
   contentGitMeta: {
-    enabled: false,
+    enabled: false, // content Git metadata display; default: false; values: true | false
   },
 };
 ```
