@@ -2,23 +2,22 @@
 
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import localeRegistry from "../../locales.config.mjs";
 import { UI_DICTIONARIES } from "../../src/i18n/ui-dictionaries.mjs";
 import { validateUiDictionaries } from "./ui.mjs";
-import { createVercelConfig, serializeVercelConfig } from "./vercel.mjs";
+import { createVercelConfig } from "./vercel.mjs";
 
 validateUiDictionaries(localeRegistry, UI_DICTIONARIES);
 
 const vercelConfigPath = fileURLToPath(
   new URL("../../vercel.json", import.meta.url)
 );
-const currentText = await fs.readFile(vercelConfigPath, "utf8");
-const currentConfig = JSON.parse(currentText);
-const expectedText = serializeVercelConfig(
-  createVercelConfig(currentConfig, localeRegistry)
-);
+const currentConfig = JSON.parse(await fs.readFile(vercelConfigPath, "utf8"));
+const expectedConfig = createVercelConfig(currentConfig, localeRegistry);
 
-if (currentText !== expectedText) {
+// Vercel rewrites JSON formatting before running the build command.
+if (!isDeepStrictEqual(currentConfig, expectedConfig)) {
   process.stderr.write(
     "vercel.json is not synchronized with locales.config.mjs. Run pnpm locales:generate.\n"
   );
