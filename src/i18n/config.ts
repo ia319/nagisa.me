@@ -1,13 +1,21 @@
-export const DEFAULT_LOCALE = "zh";
+import localeRegistry from "../../locales.config.mjs";
 
-export const SUPPORTED_LOCALES = ["zh", "en"] as const;
+export type Locale = keyof typeof localeRegistry.locales;
+export type LocaleDirection = (typeof localeRegistry.locales)[Locale]["dir"];
 
-export type Locale = (typeof SUPPORTED_LOCALES)[number];
-
-export const LOCALE_LABELS: Record<Locale, string> = {
-  zh: "中文",
-  en: "English",
-};
+export const DEFAULT_LOCALE: Locale = localeRegistry.defaultLocale;
+export const SUPPORTED_LOCALES = Object.freeze(
+  Object.keys(localeRegistry.locales) as Locale[]
+);
+export const LOCALE_LABELS = Object.fromEntries(
+  SUPPORTED_LOCALES.map(locale => [
+    locale,
+    localeRegistry.locales[locale].label,
+  ])
+) as Record<Locale, string>;
+export const LOCALE_DIRECTIONS = Object.fromEntries(
+  SUPPORTED_LOCALES.map(locale => [locale, localeRegistry.locales[locale].dir])
+) as Record<Locale, LocaleDirection>;
 
 export function isLocale(value: string | undefined): value is Locale {
   return SUPPORTED_LOCALES.some(locale => locale === value);

@@ -6,12 +6,13 @@ import Footer from "@/components/Footer.astro";
 import Tag from "@/components/Tag.astro";
 import Datetime from "@/components/Datetime.astro";
 import ContentGitMeta from "@/components/ContentGitMeta.astro";
+import TranslationSource from "@/components/TranslationSource.astro";
 import EditPost from "@/components/EditPost.astro";
 import ShareLinks from "@/components/ShareLinks.astro";
 import BackButton from "@/components/BackButton.astro";
 import BackToTopButton from "@/components/BackToTopButton.astro";
 import { getPath } from "@/utils/getPath";
-import { findPostTranslation, getPostLocale } from "@/utils/postI18n";
+import { getPostLocale, getPostTranslations } from "@/utils/postI18n";
 import { slugifyStr } from "@/utils/slugify";
 import IconChevronLeft from "@/assets/icons/IconChevronLeft.svg";
 import IconChevronRight from "@/assets/icons/IconChevronRight.svg";
@@ -29,6 +30,7 @@ type Props = {
 const { allPosts, post, posts, locale: propLocale } = Astro.props;
 const locale = propLocale ?? getPostLocale(post);
 const translationPosts = allPosts ?? posts;
+const translations = getPostTranslations(translationPosts, post);
 
 const {
   title,
@@ -95,11 +97,7 @@ const nextPost =
 
 const languageLinks = Object.fromEntries(
   SUPPORTED_LOCALES.map(targetLocale => {
-    const translation = findPostTranslation(
-      translationPosts,
-      post,
-      targetLocale
-    );
+    const translation = translations.get(targetLocale);
     const href = translation
       ? getPath(translation.id, translation.filePath, { locale: targetLocale })
       : `/${targetLocale}/posts/`;
@@ -126,7 +124,7 @@ const languageLinks = Object.fromEntries(
       {title}
     </h1>
     <div class="my-2 flex items-center gap-2">
-      <Datetime {pubDatetime} {modDatetime} {timezone} size="lg" />
+      <Datetime {pubDatetime} {modDatetime} {timezone} {locale} size="lg" />
       <span
         aria-hidden="true"
         class:list={[
@@ -141,7 +139,13 @@ const languageLinks = Object.fromEntries(
       class="app-prose mt-8 w-full max-w-app prose-pre:bg-(--shiki-light-bg) dark:prose-pre:bg-(--shiki-dark-bg)"
     >
       <Content />
-      <ContentGitMeta filePath={post.filePath} {locale} {timezone} />
+      <TranslationSource {post} {translations} {locale} />
+      <ContentGitMeta
+        filePath={post.filePath}
+        {locale}
+        {timezone}
+        class={post.data.translation ? "mt-2!" : undefined}
+      />
     </article>
 
     <hr class="my-8 border-dashed" />

@@ -1,9 +1,20 @@
 ---
 import type { GetStaticPaths } from "astro";
+import { DEFAULT_LOCALE } from "@/i18n/config";
+import { getLocalizedPath } from "@/i18n/routes";
+
+type Props = {
+  redirectPath: string;
+};
 
 export const getStaticPaths = (() => [
-  { params: { page: undefined } },
+  {
+    params: { page: undefined },
+    props: {
+      redirectPath: getLocalizedPath(DEFAULT_LOCALE, "/posts/"),
+    },
+  },
 ]) satisfies GetStaticPaths;
 
-return Astro.redirect("/zh/posts/");
+return Astro.redirect((Astro.props as Props).redirectPath);
 ---

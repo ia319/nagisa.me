@@ -1,21 +1,30 @@
 ---
 import { getCollection } from "astro:content";
-import { getPostRoutePath } from "@/utils/getPath";
-import { getPostLocale } from "@/utils/postI18n";
+import { getPath, getPostRoutePath } from "@/utils/getPath";
+import { getPostLocale, validatePostLocalizations } from "@/utils/postI18n";
+import { DEFAULT_LOCALE } from "@/i18n/config";
+
+type Props = {
+  redirectPath: string;
+};
 
 export async function getStaticPaths() {
-  const posts = await getCollection("blog", ({ data }) => !data.draft);
-  const postResult = posts
-    .filter(post => getPostLocale(post) === "zh")
+  const allPosts = await getCollection("blog");
+  validatePostLocalizations(allPosts);
+
+  return allPosts
+    .filter(post => !post.data.draft && getPostLocale(post) === DEFAULT_LOCALE)
     .map(post => ({
       params: {
         slug: getPostRoutePath(post.id, post.filePath),
       },
-      props: { post },
+      props: {
+        redirectPath: getPath(post.id, post.filePath, {
+          locale: DEFAULT_LOCALE,
+        }),
+      },
     }));
-
-  return postResult;
 }
 
-return Astro.redirect("/zh/posts/");
+return Astro.redirect((Astro.props as Props).redirectPath);
 ---

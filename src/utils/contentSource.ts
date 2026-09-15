@@ -1,25 +1,43 @@
 import path from "node:path";
-import { DEFAULT_LOCALE, isLocale, type Locale } from "@/i18n/config";
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import {
+  parseLocalizedContentIdentity,
+  validateLocalizedContentIdentities,
+} from "./localizedContentIdentity.mjs";
 
 export type ParsedLocalizedSourceId = {
   baseId: string;
+  hasLocaleSuffix: boolean;
   locale: Locale;
+};
+
+const identityConfig = {
+  defaultLocale: DEFAULT_LOCALE,
+  supportedLocales: SUPPORTED_LOCALES,
 };
 
 export function parseLocalizedSourceId(
   sourceId: string
 ): ParsedLocalizedSourceId {
-  const pathSegments = sourceId.split("/");
-  const filename = pathSegments.pop() ?? sourceId;
-  const match = filename.match(/^(.*)\.([^.]+)$/);
+  return parseLocalizedContentIdentity(
+    sourceId,
+    identityConfig
+  ) as ParsedLocalizedSourceId;
+}
 
-  if (!match || !isLocale(match[2])) {
-    return { baseId: sourceId, locale: DEFAULT_LOCALE };
-  }
-
-  const baseFilename = match[1];
-  const baseId = [...pathSegments, baseFilename].filter(Boolean).join("/");
-  return { baseId, locale: match[2] };
+/**
+ * Validate localized source identities using the shared locale registry.
+ * @param sourceIds Extension-free, content-root-relative source IDs.
+ * @returns Parsed identities in the same order as the input.
+ * @throws {Error} When localized variants violate the filename contract.
+ */
+export function validateLocalizedSourceIds(
+  sourceIds: readonly string[]
+): ParsedLocalizedSourceId[] {
+  return validateLocalizedContentIdentities(
+    sourceIds,
+    identityConfig
+  ) as ParsedLocalizedSourceId[];
 }
 
 export function getRelativeContentFilePath(

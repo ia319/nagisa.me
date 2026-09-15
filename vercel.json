@@ -8,23 +8,6 @@
           "type": "cookie",
           "key": "preferred_locale",
           "value": {
-            "eq": "en"
-          }
-        }
-      ],
-      "headers": {
-        "Cache-Control": "private, no-cache",
-        "Vary": "Cookie, Accept-Language"
-      },
-      "dest": "/en/"
-    },
-    {
-      "src": "^/$",
-      "has": [
-        {
-          "type": "cookie",
-          "key": "preferred_locale",
-          "value": {
             "eq": "zh"
           }
         }
@@ -39,10 +22,10 @@
       "src": "^/$",
       "has": [
         {
-          "type": "header",
-          "key": "accept-language",
+          "type": "cookie",
+          "key": "preferred_locale",
           "value": {
-            "re": "^[eE][nN]"
+            "eq": "en"
           }
         }
       ],
@@ -59,7 +42,7 @@
           "type": "header",
           "key": "accept-language",
           "value": {
-            "re": "^[zZ][hH]"
+            "re": "^[zZ][hH](?:[-,;\\s]|$)"
           }
         }
       ],
@@ -68,6 +51,23 @@
         "Vary": "Cookie, Accept-Language"
       },
       "dest": "/zh/"
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept-language",
+          "value": {
+            "re": "^[eE][nN](?:[-,;\\s]|$)"
+          }
+        }
+      ],
+      "headers": {
+        "Cache-Control": "private, no-cache",
+        "Vary": "Cookie, Accept-Language"
+      },
+      "dest": "/en/"
     },
     {
       "src": "^/$",

@@ -1,10 +1,12 @@
 import type { CollectionEntry } from "astro:content";
 import { BLOG_PATH } from "@/content.config";
-import { isLocale, type Locale } from "@/i18n/config";
+import type { Locale } from "@/i18n/config";
+import { resolveTranslationSource } from "@/content/translationContract.mjs";
 import {
   getRelativeContentFilePath,
   getSourceIdFromContentFilePath,
   parseLocalizedSourceId,
+  validateLocalizedSourceIds,
   type ParsedLocalizedSourceId,
 } from "./contentSource";
 
@@ -70,23 +72,62 @@ export function getPostBaseId(postOrId: BlogPostReference | string) {
   return getPostSource(postOrId).baseId;
 }
 
-export function stripLocaleFromPostSlug(slug: string) {
-  const match = slug.match(/^(.*)\.([^.]+)$/);
-  return match && isLocale(match[2]) ? match[1] : slug;
-}
-
 export function filterPostsByLocale(posts: BlogPost[], locale: Locale) {
   return posts.filter(post => getPostLocale(post) === locale);
 }
 
-export function findPostTranslation(
-  posts: BlogPost[],
-  post: BlogPost,
-  locale: Locale
-) {
+/**
+ * Validate every blog source before routes select individual language variants.
+ * @param posts Blog collection entries to validate.
+ * @returns Nothing.
+ * @throws {Error} When two files conflict or use an invalid localized filename.
+ */
+export function validatePostLocalizations(posts: BlogPost[]): void {
+  validateLocalizedSourceIds(posts.map(getPostSourceId));
+}
+
+/**
+ * Index the available translations that share a post's base path.
+ * @param posts Blog collection entries containing possible translations.
+ * @param post Post whose translations should be selected.
+ * @returns Available translations keyed by locale.
+ * @throws {Error} When localized source identities are invalid.
+ */
+export function getPostTranslations(posts: BlogPost[], post: BlogPost) {
+  validatePostLocalizations(posts);
   const baseId = getPostBaseId(post);
-  return posts.find(
-    candidate =>
-      getPostBaseId(candidate) === baseId && getPostLocale(candidate) === locale
+  const translations = new Map<Locale, BlogPost>();
+
+  for (const candidate of posts) {
+    if (getPostBaseId(candidate) !== baseId) continue;
+    translations.set(getPostLocale(candidate), candidate);
+  }
+
+  return translations;
+}
+
+/**
+ * Resolve the declared source against available non-draft article variants.
+ * @param post Article whose translation metadata declares the source language.
+ * @param translations Same-base variants returned by getPostTranslations.
+ * @returns The shared source resolution result with the source blog entry.
+ * @throws {Error} When an entry has an invalid localized source path.
+ */
+export function getPostTranslationSource(
+  post: BlogPost,
+  translations: ReadonlyMap<Locale, BlogPost>
+) {
+  const { baseId, locale } = getPostSource(post);
+  // Detail routes include scheduled articles; only drafts lack a generated route.
+  const candidates = [...translations.values()]
+    .filter(candidate => !candidate.data.draft)
+    .map(candidate => {
+      const { baseId, locale } = getPostSource(candidate);
+      return { baseId, locale, post: candidate };
+    });
+
+  return resolveTranslationSource(
+    { baseId, locale, translation: post.data.translation },
+    candidates
   );
 }
