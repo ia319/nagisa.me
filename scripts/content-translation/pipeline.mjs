@@ -253,8 +253,12 @@ export function completeTranslation(plan, responses) {
  */
 export function validateTranslation(plan, responses, files) {
   const diagnostics = [];
+  // Match assembly normalization so CRLF does not look like new block content.
   const results = new Map(
-    responses.map(response => [response.id, response.text])
+    responses.map(response => [
+      response.id,
+      response.text.trim().replace(/\r\n?/g, "\n"),
+    ])
   );
   const completed = [];
   for (const output of plan.outputs) {

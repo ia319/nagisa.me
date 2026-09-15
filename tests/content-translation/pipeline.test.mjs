@@ -550,6 +550,67 @@ test("keeps format boundaries in two complete requests without constraining tran
   }
 });
 
+test("validates identical drafts across model line endings without mutating responses", () => {
+  const plan = prepareTranslation({
+    ...input,
+    targetLocales: ["en"],
+    source: {
+      ...input.source,
+      text: "---\ntitle: Installation\ndescription: Exemple\n---\n    secret()\n\nBonjour.\n\n```js\nfirst()\n```\n\n```js\nsecond()\n```\n",
+    },
+  });
+  const original = plan.requests.map(translate);
+  const expected = completeTranslation(plan, original);
+  assert.deepEqual(validateTranslation(plan, original, expected.files), []);
+  assert.ok(
+    parseArticle(expected.files[0].text).body.startsWith("    secret()\n")
+  );
+  for (const newline of ["\n", "\r\n", "\r"]) {
+    const responses = original.map(response => ({
+      ...response,
+      text: ` \t${newline}${response.text.replaceAll("\n", newline)}${newline}\t `,
+    }));
+    const before = structuredClone(responses);
+    const result = completeTranslation(plan, responses);
+    assert.deepEqual(result, expected);
+    assert.deepEqual(validateTranslation(plan, responses, result.files), []);
+    assert.deepEqual(responses, before);
+  }
+});
+
+test("retains real block-boundary findings across model line endings", () => {
+  const plan = prepareTranslation({
+    ...input,
+    targetLocales: ["en"],
+    source: {
+      ...input.source,
+      text: "---\ntitle: Installation\ndescription: Exemple\n---\nBonjour.\n\n```js\nfirst()\n```\n\n```js\nsecond()\n```\n",
+    },
+  });
+  const token = plan.markdown.separators[0].after.token;
+  const responses = plan.requests.map(request => {
+    const response = translate(request);
+    if (request.field === "body")
+      response.text = response.text.replace(
+        token,
+        `Added content.\n\n${token}`
+      );
+    return response;
+  });
+  const result = completeTranslation(plan, responses);
+  const expected = validateTranslation(plan, responses, result.files);
+  assert.ok(expected.some(item => item.code === "block-separator-unresolved"));
+  for (const newline of ["\r\n", "\r"]) {
+    const changed = responses.map(response => ({
+      ...response,
+      text: response.text.replaceAll("\n", newline),
+    }));
+    const saved = completeTranslation(plan, changed);
+    assert.deepEqual(saved, result);
+    assert.deepEqual(validateTranslation(plan, changed, saved.files), expected);
+  }
+});
+
 test("normalizes source encoding and rejects unsafe model metadata", () => {
   const plan = prepareTranslation({
     ...input,
