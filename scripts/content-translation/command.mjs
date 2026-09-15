@@ -17,7 +17,7 @@ import { prepareWrites, writeTranslations } from "./write.mjs";
  * @param {string} root Working directory, expected to be the project root.
  * @param {string[]} args Command arguments after the script name.
  * @param {(message: string) => void} report Help, progress, and diagnostic sink.
- * @param {AbortSignal} signal Cancellation signal shared with process and write boundaries.
+ * @param {AbortSignal} signal User cancellation signal for generation, publication, and final checks.
  * @param {{stdout: import("node:stream").Writable, stderr: import("node:stream").Writable}} output Destinations for original Ollama output.
  * @returns {Promise<void>} Resolves after help or successful publication.
  * @throws {Error} When arguments, preflight, generation, or publication fails.
@@ -55,17 +55,16 @@ export async function runTranslationCommand(
   let service;
   let failed = false;
   try {
-    if (plan.requests.length) {
+    if (plan.requests.length)
       service = await openOllamaService(settings.service, report, signal);
-      signal = service.signal;
-    }
-    const responses = plan.requests.length
+    // Service health only gates generation; completed responses can outlive the service.
+    const responses = service
       ? await runOllamaRequests(
           plan.requests,
           plan.model,
           service.host,
           report,
-          signal,
+          service.signal,
           output
         )
       : [];

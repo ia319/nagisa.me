@@ -353,6 +353,106 @@ test("starts a private service only for real requests and stops it after saved-d
   assert.equal(process.env.OLLAMA_HOST, undefined);
 });
 
+test("saves completed responses after service exit and still checks cleanup", async t => {
+  for (const stage of [
+    "--- Save drafts ---",
+    "Written:",
+    "--- Content checks ---",
+  ])
+    for (const cleanupConfirmed of [true, false])
+      await t.test(
+        `${stage}, cleanup confirmed: ${cleanupConfirmed}`,
+        async t => {
+          const { root, entries, calls, controller, output, messages } =
+            fixture(t);
+          mockOllamaPorts(t);
+          const servers = mockOllamaSupervisor(t);
+          let exited = false;
+          const running = runTranslationCommand(
+            root,
+            [...args, "--ollama-port", "auto"],
+            message => {
+              messages.push(message);
+              if (!exited && message.includes(stage)) {
+                exited = true;
+                if (cleanupConfirmed) servers[0].event("stopped");
+                servers[0].close(1);
+              }
+            },
+            controller.signal,
+            output
+          );
+          if (cleanupConfirmed) await running;
+          else
+            await assert.rejects(
+              running,
+              /Ollama cleanup failed:.*cleanup was not confirmed/s
+            );
+          assert.equal(exited, true);
+          assert.equal(controller.signal.aborted, false);
+          assert.equal(calls.filter(call => call.args[0] === "run").length, 4);
+          for (const locale of ["en", "ar"])
+            assert.ok(
+              entries.has(path.join(root, `src/data/blog/post.${locale}.md`))
+            );
+          assert.equal(
+            entries.get(path.join(root, "src/data/blog/post.fr.md")).text,
+            source
+          );
+          assert.ok(
+            [...entries.keys()].every(
+              file => !path.basename(file).startsWith(".translation-")
+            )
+          );
+          assert.ok(
+            messages.some(message =>
+              message.includes("Content validation: 0 issue")
+            )
+          );
+          assert.match(messages.at(-1), /Generated 2 draft/);
+        }
+      );
+});
+
+test("honors caller cancellation after generation and retains published drafts", async t => {
+  for (const [stage, saved] of [
+    ["--- Save drafts ---", []],
+    ["Written:", ["en"]],
+    ["--- Content checks ---", ["en", "ar"]],
+  ])
+    await t.test(stage, async t => {
+      const { root, entries, calls, controller, output, messages } = fixture(t);
+      mockOllamaPorts(t);
+      const servers = mockOllamaSupervisor(t);
+      const cancelled = new Error("Translation cancelled by caller");
+      await assert.rejects(
+        runTranslationCommand(
+          root,
+          [...args, "--ollama-port", "auto"],
+          message => {
+            messages.push(message);
+            if (message.includes(stage)) controller.abort(cancelled);
+          },
+          controller.signal,
+          output
+        ),
+        error => error === cancelled
+      );
+      assert.equal(calls.filter(call => call.args[0] === "run").length, 4);
+      for (const locale of ["en", "ar"])
+        assert.equal(
+          entries.has(path.join(root, `src/data/blog/post.${locale}.md`)),
+          saved.includes(locale)
+        );
+      assert.equal(servers[0].stops, 1);
+      assert.equal(
+        entries.get(path.join(root, "src/data/blog/post.fr.md")).text,
+        source
+      );
+      assert.ok(!messages.some(message => message.startsWith("[cleanup]")));
+    });
+});
+
 test("leaves an unavailable external service unmanaged", async t => {
   const { run, calls } = fixture(t);
   const ports = mockOllamaPorts(t);
