@@ -29,9 +29,17 @@ export async function renderEntry(entry) {
   return {Content:createComponent(() => render\`\${unescapeHTML(entry.body)}\`)};
 }
 export {renderEntry as render};`;
+const manifestFile = path.join(
+  siteRoot,
+  "src/generated/contentGitMetaManifest.json"
+);
 const sources = new Map([
   ["astro:content", contentSource],
   ["astro/components/viewtransitions.css", "export {};"],
+  [
+    manifestFile,
+    "export const entries = {}; export default {version: 1, entries};",
+  ],
 ]);
 for (const file of [
   "layouts/Layout.astro",
@@ -84,6 +92,8 @@ const { default: Main } = await import(
   await componentUrl(path.join(siteRoot, "src/layouts/Main.astro"))
 );
 const { rendered } = await import(moduleUrl("astro:content"));
+const { entries: gitEntries } = await import(moduleUrl(manifestFile));
+const { SITE } = await import(moduleUrl(path.join(siteRoot, "src/config.ts")));
 const container = await AstroContainer.create();
 
 const post = (id, tags = ["frontend"]) => ({
@@ -288,4 +298,178 @@ test("retains the default description style and post breadcrumb behavior on othe
   });
   assert.match(html, /<p class="mt-2 mb-6 italic">\s*All posts\s*<\/p>/);
   assert.ok(html.includes("Posts (page 2)"));
+});
+
+test("shows Git metadata only for published custom introductions on the first page", async t => {
+  const enabled = SITE.contentGitMeta.enabled;
+  t.after(() => {
+    SITE.contentGitMeta.enabled = enabled;
+  });
+  SITE.contentGitMeta.enabled = true;
+  const cases = [
+    { docs: [], expected: false },
+    { docs: [entry("frontend")], expected: false },
+    {
+      docs: [entry("frontend", { description: "  " }, "\n")],
+      expected: false,
+    },
+    {
+      docs: [entry("frontend", { draft: true, description: "Draft" }, "Body")],
+      expected: false,
+    },
+    {
+      docs: [entry("frontend.en", { description: "Other language" }, "Body")],
+      expected: false,
+    },
+    { docs: [entry("frontend", { description: "Summary" })], expected: true },
+    { docs: [entry("frontend", {}, "<p>Body only</p>")], expected: true },
+  ];
+  for (const { docs, expected } of cases) {
+    const tag = getTagIndex([post("sample")], docs).tags[0];
+    const html = await container.renderToString(TagDetail, detailOptions(tag));
+    assert.equal(html.includes("首次提交于"), expected);
+    if (expected) {
+      assert.ok(html.includes("未知"));
+      assert.ok(html.includes("data-pagefind-ignore"));
+      assert.ok(html.indexOf("首次提交于") < html.indexOf("<hr"));
+    }
+    const pageTwo = await container.renderToString(
+      TagDetail,
+      detailOptions(tag, 2)
+    );
+    assert.ok(!pageTwo.includes("首次提交于"));
+  }
+  SITE.contentGitMeta.enabled = false;
+  const tag = getTagIndex(
+    [post("sample")],
+    [entry("frontend", { description: "Summary" }, "<p>Body</p>")]
+  ).tags[0];
+  const html = await container.renderToString(TagDetail, detailOptions(tag));
+  assert.ok(!html.includes("首次提交于") && !html.includes("<aside"));
+});
+
+test("retains article Git date, hash, link and partial-history rules for tags", async t => {
+  const original = {
+    enabled: SITE.contentGitMeta.enabled,
+    timezone: SITE.timezone,
+    repository: SITE.repository,
+  };
+  t.after(() => {
+    SITE.contentGitMeta.enabled = original.enabled;
+    SITE.timezone = original.timezone;
+    SITE.repository = original.repository;
+  });
+  SITE.contentGitMeta.enabled = true;
+  SITE.timezone = "Asia/Tokyo";
+  const first = { hash: "a".repeat(40), isoDate: "2024-02-01T18:30:00Z" };
+  const last = { hash: "b".repeat(64), isoDate: "2024-02-02T21:00:00Z" };
+  const cases = [
+    {
+      name: "first",
+      meta: { firstCommitted: first, lastCommitted: first },
+      commits: [first],
+    },
+    {
+      name: "edited",
+      meta: { firstCommitted: first, lastCommitted: last },
+      commits: [first, last],
+      edited: true,
+    },
+    { name: "missing", meta: {}, commits: [], unknown: true },
+    { name: "first-only", meta: { firstCommitted: first }, commits: [first] },
+    {
+      name: "last-only",
+      meta: { lastCommitted: last, commitCount: 2 },
+      commits: [last],
+      unknown: true,
+      edited: true,
+    },
+    {
+      name: "single-last",
+      meta: { lastCommitted: last, commitCount: 1 },
+      commits: [],
+      unknown: true,
+    },
+    {
+      name: "plain-hash",
+      meta: { firstCommitted: first, lastCommitted: last },
+      commits: [first, last],
+      edited: true,
+      unlinked: true,
+    },
+  ];
+  for (const item of cases) {
+    const id = "git-" + item.name;
+    gitEntries[`src/data/tags/${id}.md`] = item.meta;
+    SITE.repository = item.unlinked ? "" : "https://github.com/example/blog";
+    const tag = getTagIndex(
+      [post("sample", [id])],
+      [entry(id, { description: "Summary" })]
+    ).tags[0];
+    const html = await container.renderToString(TagDetail, detailOptions(tag));
+    const meta = html.match(/<aside\b[\s\S]*?<\/aside>/)?.[0];
+    assert.ok(meta, item.name);
+    assert.equal(meta.includes("编辑于"), Boolean(item.edited), item.name);
+    assert.equal(meta.includes("未知"), Boolean(item.unknown), item.name);
+    assert.equal((meta.match(/<time\b/g) || []).length, item.commits.length);
+    for (const commit of item.commits) {
+      assert.ok(meta.includes(`datetime="${commit.isoDate}"`));
+      assert.ok(
+        meta.includes(
+          commit === first ? "2024-02-02 03:30" : "2024-02-03 06:00"
+        )
+      );
+      assert.ok(meta.includes(`title="提交 ${commit.hash}"`));
+      assert.match(
+        meta,
+        new RegExp(">\\s*" + commit.hash.slice(0, 7) + "\\s*<")
+      );
+      if (!item.unlinked)
+        assert.ok(
+          meta.includes(
+            `href="https://github.com/example/blog/commit/${commit.hash}"`
+          )
+        );
+    }
+    if (item.unlinked) assert.ok(!meta.includes("<a "));
+  }
+});
+
+test("uses the current language tag file history independently of related articles", async t => {
+  const enabled = SITE.contentGitMeta.enabled;
+  t.after(() => {
+    SITE.contentGitMeta.enabled = enabled;
+  });
+  SITE.contentGitMeta.enabled = true;
+  const id = "git-localized";
+  const docs = [
+    entry(id, { description: "中文介绍" }),
+    entry(id + ".en", { description: "English introduction" }),
+  ];
+  const hashes = { zh: "c".repeat(40), en: "d".repeat(40) };
+  for (const locale of ["zh", "en"])
+    gitEntries[`src/data/tags/${id}${locale === "en" ? ".en" : ""}.md`] = {
+      firstCommitted: { hash: hashes[locale], isoDate: "2024-01-01T00:00:00Z" },
+    };
+  const posts = [post("sample", [id]), post("sample.en", [id])];
+  const before = new Map();
+  for (const tag of getTagIndex(posts, docs).tags) {
+    const html = await container.renderToString(TagDetail, detailOptions(tag));
+    const meta = html.match(/<aside\b[\s\S]*?<\/aside>/)?.[0];
+    assert.ok(meta.includes(hashes[tag.locale]));
+    assert.ok(!meta.includes(hashes[tag.locale === "en" ? "zh" : "en"]));
+    assert.ok(
+      meta.includes(tag.locale === "en" ? "First committed" : "首次提交于")
+    );
+    before.set(tag.locale, meta);
+  }
+  posts.push(post("another", [id]), post("another.en", [id]));
+  for (const tag of getTagIndex(posts, docs).tags) {
+    assert.equal(tag.count, 2);
+    const html = await container.renderToString(TagDetail, detailOptions(tag));
+    assert.equal(
+      html.match(/<aside\b[\s\S]*?<\/aside>/)?.[0],
+      before.get(tag.locale)
+    );
+  }
 });

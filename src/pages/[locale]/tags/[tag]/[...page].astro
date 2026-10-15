@@ -6,6 +6,7 @@ import Layout from "@/layouts/Layout.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import Card from "@/components/Card.astro";
+import ContentGitMeta from "@/components/ContentGitMeta.astro";
 import Pagination from "@/components/Pagination.astro";
 import { getTagIndex, getTagLanguageLinks } from "@/utils/getTagIndex";
 import getPostsByTag from "@/utils/getPostsByTag";
@@ -146,6 +147,11 @@ const summary =
         >
           {t(locale, "tag.backToIntroduction")}
         </a>
+      )
+    }
+    {
+      page.currentPage === 1 && entry && (description?.trim() || hasBody) && (
+        <ContentGitMeta filePath={entry.filePath} locale={locale} />
       )
     }
     <hr class="my-8 border-border" />

@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-export const CONTENT_ROOTS = ["src/data/blog", "src/data/pages"];
+export const CONTENT_ROOTS = [
+  "src/data/blog",
+  "src/data/pages",
+  "src/data/tags",
+];
 
 const GIT_HASH_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 

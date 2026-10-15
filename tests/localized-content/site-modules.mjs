@@ -77,7 +77,8 @@ export async function getCollection(name) { return name === "tags" ? tags : post
       file,
       code,
       ts.ScriptTarget.ES2022,
-      true
+      true,
+      ts.ScriptKind.JS
     );
     const replacements = [];
     for (const statement of parsed.statements) {
