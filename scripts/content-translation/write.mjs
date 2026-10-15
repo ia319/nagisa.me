@@ -2,10 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import childProcess from "node:child_process";
+import { getContentDirectory } from "./targets.mjs";
 import { readProjectFile } from "./snapshot.mjs";
 
-async function inspectTarget(root, relativePath) {
-  const base = path.resolve(root, "src/data/blog");
+async function inspectTarget(root, kind, relativePath) {
+  const base = path.resolve(root, getContentDirectory(kind));
   const file = path.resolve(base, relativePath);
   const relative = path.relative(base, file);
   if (
@@ -105,24 +106,26 @@ if ($originalOwner -eq $temporaryOwner) { 'same' } else { 'different' }`;
  * Capture target contents and verify all directories before model execution.
  * @param {string} root Canonical project root.
  * @param {readonly {path: string, overwrite: boolean}[]} targets Kernel-validated targets.
+ * @param {"blog" | "tags"} kind Allowed collection; defaults to articles.
  * @returns Prepared targets with original text for concurrent-edit checks.
  * @throws {Error} When targets are unsafe or existence differs from the kernel snapshot.
  */
-export async function prepareWrites(root, targets) {
+export async function prepareWrites(root, targets, kind = "blog") {
+  getContentDirectory(kind);
   const prepared = [];
   for (const target of targets) {
-    const state = await inspectTarget(root, target.path);
+    const state = await inspectTarget(root, kind, target.path);
     if ((state.before !== undefined) !== target.overwrite)
       throw new Error(
         `Target existence changed after planning: ${target.path}`
       );
     prepared.push(state);
   }
-  return { root, targets: prepared };
+  return { root, kind, targets: prepared };
 }
 
 /**
- * Publish validated articles atomically, retaining completed outputs on failure.
+ * Publish validated content atomically, retaining completed outputs on failure.
  * @param {Awaited<ReturnType<typeof prepareWrites>>} prepared Original target states.
  * @param {readonly {path: string, text: string}[]} outputs Complete kernel-validated output set.
  * @param {(message: string) => void} report Completion, failure, and retained temporary-file messages.
@@ -144,8 +147,8 @@ export async function writeTranslations(prepared, outputs, report, signal) {
     try {
       signal.throwIfAborted();
       if (
-        (await inspectTarget(prepared.root, target.path)).before !==
-        target.before
+        (await inspectTarget(prepared.root, prepared.kind, target.path))
+          .before !== target.before
       )
         throw new Error(`Target changed during translation: ${target.path}`);
       const text = outputs[index].text;
@@ -174,8 +177,8 @@ export async function writeTranslations(prepared, outputs, report, signal) {
         await verifyReplacementOwner(target.file, temporary, signal);
       signal.throwIfAborted();
       if (
-        (await inspectTarget(prepared.root, target.path)).before !==
-        target.before
+        (await inspectTarget(prepared.root, prepared.kind, target.path))
+          .before !== target.before
       )
         throw new Error(`Target changed before publication: ${target.path}`);
       if (target.before === undefined) {
@@ -195,7 +198,7 @@ export async function writeTranslations(prepared, outputs, report, signal) {
         temporary = undefined;
         completed.push(target.path);
       }
-      report(`Written: src/data/blog/${target.path}`);
+      report(`Written: ${getContentDirectory(prepared.kind)}/${target.path}`);
     } catch (error) {
       report(`Completed: ${completed.join(", ") || "none"}`);
       report(`Failed: ${target.path}: ${error.message}`);

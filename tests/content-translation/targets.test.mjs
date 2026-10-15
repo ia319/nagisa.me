@@ -117,6 +117,6 @@ test("rejects duplicate content identities and unsafe or case-conflicting paths"
   ])
     assert.throws(
       () => planTranslationTargets({ ...base, sourcePath }),
-      /blog-relative|blog Markdown/
+      /content-relative|Markdown content/
     );
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parse } from "yaml";
-import { parseArticle } from "../../scripts/content-translation/frontmatter.mjs";
+import { parseContent } from "../../scripts/content-translation/frontmatter.mjs";
 import {
   completeTranslation,
   prepareTranslation,
@@ -81,8 +81,8 @@ test("keeps source metadata and completed body when JSON is unreadable without r
         : translate(request)
     );
     const result = completeTranslation(plan, responses);
-    const article = parseArticle(result.files[0].text);
-    assert.deepEqual(article.fields, plan.article.fields);
+    const article = parseContent(result.files[0].text);
+    assert.deepEqual(article.fields, plan.content.fields);
     assert.ok(article.body.includes("## Setup"));
     assert.ok(article.body.includes("Hello `secret()`"));
     assert.equal(article.document.get("draft"), true);
@@ -115,7 +115,7 @@ test("applies valid metadata fields only and never copies unexpected model keys"
         : translate(request)
     );
     const result = completeTranslation(plan, responses);
-    const article = parseArticle(result.files[0].text);
+    const article = parseContent(result.files[0].text);
     assert.equal(article.fields.title, "Setup");
     assert.equal(article.fields.description, "Exemple");
     assert.deepEqual(article.fields.tags, ["Astro", "Outils"]);
@@ -156,7 +156,7 @@ test("never requests tags and ignores every model tag value", () => {
         : translate(request)
     );
     const result = completeTranslation(plan, responses);
-    assert.deepEqual(parseArticle(result.files[0].text).fields.tags, [
+    assert.deepEqual(parseContent(result.files[0].text).fields.tags, [
       "Astro",
       "Outils",
     ]);
@@ -180,7 +180,7 @@ test("round-trips translated JSON strings through YAML including punctuation and
       : translate(request)
   );
   const result = completeTranslation(plan, responses);
-  assert.deepEqual(parseArticle(result.files[0].text).fields, {
+  assert.deepEqual(parseContent(result.files[0].text).fields, {
     ...fields,
     tags: ["Astro", "Outils"],
   });
@@ -220,7 +220,7 @@ test("reports physical source and saved line numbers including multiline frontma
     )
   );
   assert.ok(!group.message.includes("saved occurrences:"));
-  assert.equal(plan.article.bodyLine, 8);
+  assert.equal(plan.content.bodyLine, 8);
 });
 
 test("assembles all targets from model text without exposing copied metadata", () => {
@@ -269,7 +269,7 @@ test("assembles all targets from model text without exposing copied metadata", (
     ["guides/post.en.md", "guides/post.pt-BR.md"]
   );
   for (const file of result.files) {
-    const output = parseArticle(file.text);
+    const output = parseContent(file.text);
     assert.equal(output.fields.title, "Setup");
     assert.deepEqual(output.fields.tags, ["Astro", "Outils"]);
     assert.equal(output.document.get("draft"), true);
@@ -315,14 +315,14 @@ test("preserves tag presence, order, duplicates, and YAML comments", () => {
       },
     });
     const result = completeTranslation(plan, plan.requests.map(translate));
-    assert.deepEqual(parseArticle(result.files[0].text).fields.tags, [
+    assert.deepEqual(parseContent(result.files[0].text).fields.tags, [
       "Outils",
       "Astro",
       "Outils",
     ]);
     assert.equal(
-      parseArticle(result.files[0].text).document.get("tags", true).toString(),
-      plan.article.document.get("tags", true).toString()
+      parseContent(result.files[0].text).document.get("tags", true).toString(),
+      plan.content.document.get("tags", true).toString()
     );
     assert.match(result.files[0].text, /# Stable IDs|# First/);
     assert.deepEqual(Object.keys(parse(plan.requests[0].text)), [
@@ -502,7 +502,7 @@ test("keeps format boundaries in two complete requests without constraining tran
       return response;
     });
     const result = completeTranslation(plan, responses);
-    const saved = parseArticle(result.files[0].text);
+    const saved = parseContent(result.files[0].text);
     assert.ok(saved.body.includes("more physical lines\\\nSuite."));
     assert.ok(saved.body.includes("</div>\n\n[docs]:"));
     assert.deepEqual(validateTranslation(plan, responses, result.files), []);
@@ -535,7 +535,7 @@ test("validates identical drafts across model line endings without mutating resp
   const expected = completeTranslation(plan, original);
   assert.deepEqual(validateTranslation(plan, original, expected.files), []);
   assert.ok(
-    parseArticle(expected.files[0].text).body.startsWith("    secret()\n")
+    parseContent(expected.files[0].text).body.startsWith("    secret()\n")
   );
   for (const newline of ["\n", "\r\n", "\r"]) {
     const responses = original.map(response => ({
@@ -614,7 +614,7 @@ test("rejects malformed, duplicate, aliased, and wrongly typed frontmatter", () 
     "---\ntitle: 1\ndescription: D\n---\n",
     "---\ntitle: A\ndescription: D\ntags: A\n---\n",
   ])
-    assert.throws(() => parseArticle(source));
+    assert.throws(() => parseContent(source));
 });
 
 test("preserves omitted tags and protects code-only bodies without model requests", () => {
@@ -628,7 +628,7 @@ test("preserves omitted tags and protects code-only bodies without model request
   });
   assert.deepEqual(plan.requests, []);
   const file = completeTranslation(plan, []).files[0];
-  assert.equal(parseArticle(file.text).document.has("tags"), false);
+  assert.equal(parseContent(file.text).document.has("tags"), false);
   assert.ok(file.text.endsWith("```\n"));
   assert.deepEqual(validateTranslation(plan, [], [file]), []);
 });
@@ -669,7 +669,7 @@ test("keeps malformed field output as draft data and reports field, position, an
   }));
   const result = completeTranslation(plan, responses);
   assert.equal(
-    parseArticle(result.files[0].text).fields.title,
+    parseContent(result.files[0].text).fields.title,
     "Title\nMore __KEEP_999_999__"
   );
   const diagnostics = validateTranslation(plan, responses, result.files);
@@ -763,8 +763,149 @@ test("preserves significant leading indentation around protected blocks", () => 
   const responses = plan.requests.map(translate);
   const result = completeTranslation(plan, responses);
   assert.equal(
-    parseArticle(result.files[0].text).body,
+    parseContent(result.files[0].text).body,
     "    secret()\n\nHello.\n"
   );
   assert.deepEqual(validateTranslation(plan, responses, result.files), []);
+});
+
+test("translates tag names with only the description and body actually present", () => {
+  for (const source of [
+    "---\nname: Outils\naliases: [outils]\n---\n",
+    "---\nname: Outils\ndescription: Exemple\n---\n",
+    "---\nname: Outils\ndescription: ''\n---\n\`\`\`js\nsecret()\n\`\`\`\n",
+    "---\nname: Outils\ndescription: Exemple\n---\n## Installation\n\nBonjour \`secret()\`.\n",
+  ]) {
+    const plan = prepareTranslation({
+      ...input,
+      kind: "tags",
+      source: { path: "tools.fr.md", text: source },
+      files: [{ path: "tools.fr.md", kind: "file" }],
+      targetLocales: ["en"],
+    });
+    const request = plan.requests.find(item => item.field === "metadata");
+    const metadata = parse(request.text);
+    assert.equal(metadata.name, "Outils");
+    assert.equal(
+      Object.hasOwn(metadata, "description"),
+      source.includes("description: Exemple")
+    );
+    assert.ok(
+      !Object.hasOwn(metadata, "tags") &&
+        !Object.hasOwn(metadata, "aliases") &&
+        !Object.hasOwn(metadata, "title")
+    );
+    assert.equal(
+      plan.requests.some(item => item.field === "body"),
+      source.includes("Bonjour")
+    );
+    const result = completeTranslation(plan, plan.requests.map(translate));
+    const saved = parseContent(result.files[0].text, "tags");
+    assert.equal(result.files[0].path, "tools.en.md");
+    assert.equal(saved.fields.name, "Tools");
+    assert.equal(
+      saved.document.has("description"),
+      source.includes("description:")
+    );
+    assert.equal(saved.document.has("aliases"), false);
+    assert.equal(saved.document.get("draft"), true);
+    assert.deepEqual(saved.document.get("translation").toJSON(), {
+      sourceLocale: "fr",
+      provider: "ollama",
+      model: "example:12b",
+    });
+    assert.deepEqual(
+      validateTranslation(plan, plan.requests.map(translate), result.files),
+      []
+    );
+  }
+});
+
+test("preserves the target tag alias node on force and rejects absent target snapshots", () => {
+  const tagInput = {
+    ...input,
+    kind: "tags",
+    source: {
+      path: "tools.en.md",
+      text: "---\nname: Tools\naliases: [source-only]\n---\n",
+    },
+    targetLocales: ["fr"],
+    files: [
+      { path: "tools.en.md", kind: "file" },
+      { path: "tools.fr.md", kind: "file" },
+    ],
+    force: true,
+  };
+  assert.throws(
+    () => prepareTranslation(tagInput),
+    /missing from the input snapshot/
+  );
+  const plan = prepareTranslation({
+    ...tagInput,
+    targetTexts: new Map([
+      [
+        "tools.fr.md",
+        "---\nname: Old\naliases:\n  - outils # Keep legacy link\n---\n",
+      ],
+    ]),
+  });
+  const responses = plan.requests.map(request => ({
+    id: request.id,
+    text: '{"name":"Outils","aliases":["wrong"],"description":"invented"}',
+  }));
+  const result = completeTranslation(plan, responses);
+  const saved = parseContent(result.files[0].text, "tags");
+  assert.equal(result.files[0].path, "tools.fr.md");
+  assert.deepEqual(saved.document.get("aliases").toJSON(), ["outils"]);
+  assert.match(result.files[0].text, /# Keep legacy link/);
+  assert.equal(saved.document.has("description"), false);
+  assert.equal(
+    validateTranslation(plan, responses, result.files).filter(
+      item => item.code === "metadata-extra-field"
+    ).length,
+    2
+  );
+});
+
+test("reports malformed translated tag names with tag-file locations after assembly", () => {
+  const plan = prepareTranslation({
+    ...input,
+    kind: "tags",
+    source: { path: "tools.md", text: "---\nname: Outils\n---\n" },
+    files: [{ path: "tools.md", kind: "file" }],
+    targetLocales: ["en"],
+  });
+  const responses = [
+    { id: "en:metadata", text: JSON.stringify({ name: "Tools\nMore" }) },
+  ];
+  const result = completeTranslation(plan, responses);
+  assert.equal(
+    parseContent(result.files[0].text, "tags").fields.name,
+    "Tools\nMore"
+  );
+  assert.ok(
+    validateTranslation(plan, responses, result.files).some(
+      item =>
+        item.code === "field-newline" &&
+        /src\/data\/tags\/tools.en.md.*name/.test(item.message)
+    )
+  );
+});
+
+test("rejects invalid tag source fields, nested IDs, and arbitrary collection roots", () => {
+  for (const text of [
+    "---\nname: ''\n---\n",
+    "---\nname: 12\n---\n",
+    "---\nname: A\ndescription: []\n---\n",
+    "---\nname: A\naliases: old\n---\n",
+  ])
+    assert.throws(() => parseContent(text, "tags"), /Frontmatter/);
+  assert.throws(
+    () => prepareTranslation({ ...input, kind: "../../outside" }),
+    /Unknown content kind/
+  );
+  assert.throws(
+    () => prepareTranslation({ ...input, kind: "tags" }),
+    /Invalid tag ID/
+  );
 });

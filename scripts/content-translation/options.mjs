@@ -3,9 +3,10 @@ import { parseArgs } from "node:util";
 export const TRANSLATION_HELP = `Usage: pnpm content:translate [--] <file> --to <locale> [options]
        pnpm content:translate [--] --staged --to <locale> [options]
 
-Translate one Markdown article under src/data/blog with a local Ollama model.
+Translate one Markdown article (src/data/blog) or tag (src/data/tags)
+with a local Ollama model.
 Run from the project root. Select a source file or --staged and provide --to.
-Run without arguments to show help without reading articles or calling Ollama.
+Run without arguments to show help without reading content or calling Ollama.
 
 Options:
   --to <locale>         Configured target language; repeatable
@@ -13,18 +14,24 @@ Options:
   --model <name>        Local model name for this run
   --ollama-port <port|auto>
                        Private service port (1–65535) or automatic selection
-  --staged             One added, modified, or renamed article from the Git index
+  --staged             One added, modified, or renamed blog or tag file from the Git index
   --prompt <text>       Custom translation context
   --prompt-file <file>  UTF-8 context file; mutually exclusive with --prompt
   --prompt-mode <mode>  Built-in context mode: append (default) or replace
-  --force              Replacement of existing target articles
+  --force              Replacement of existing target files
   -h, --help           Show help and exit
 
+Examples:
+  pnpm content:translate -- src/data/blog/guide.md --to en
+  pnpm content:translate -- src/data/tags/frontend.md --to en
+
 Input:
-  File mode uses the working-tree source, tag definition filenames, and locale registry.
-  --staged reads the source, tag definition filenames, and locales.config.mjs
-  from Git index. Zero or multiple changed source articles stop the command.
-  Output conflict checks always use the working tree.
+  File mode uses the working-tree source, required tag metadata, and locale registry.
+  --staged reads the source, required tag metadata, and locales.config.mjs
+  from Git index. Zero or multiple changed source files across both collections stop the command.
+  Output conflict checks always use the working tree. With --staged --force,
+  an existing tag target must be in the index and its aliases must match the
+  working tree; otherwise use file mode or synchronize the aliases first.
   The source language comes from the filename suffix, or the configured default
   when no language suffix is present. --from must match this language.
   Every --to language must differ from the source language, even with --force.
@@ -72,8 +79,10 @@ Ollama service:
   limited service-log tail.
 
 Output and recovery:
-  Metadata requests include non-empty title and description fields and only tags
-  without reusable translations. Metadata and body use separate requests.
+  Articles send non-empty title and description; tags send name and any non-empty
+  description. Article tags are copied locally without model access. Metadata and
+  body use separate requests; an empty or protected-only body needs no request.
+  New tag translations omit aliases; replacements preserve target-language aliases.
   All model responses are collected before drafts are written. Draft saving and
   content checks continue if Ollama exits after all responses are collected.
   Content checks read the saved drafts and report findings without rejecting them.
@@ -81,7 +90,7 @@ Output and recovery:
   <name>.<locale>.md, or <name>.md for the default language. Existing target
   filenames are retained.
   Invalid metadata retains the affected source values; no repair is requested.
-  Input or model execution failures leave article files unchanged. Write failures
+  Input or model execution failures leave content files unchanged. Write failures
   retain completed drafts and report failed targets, pending targets, and temporary
   files.
   Review retained temporary files before removing them. Use Ctrl+C to cancel.

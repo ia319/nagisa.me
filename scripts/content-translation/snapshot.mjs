@@ -4,9 +4,7 @@ import childProcess from "node:child_process";
 import { validateLocaleRegistry } from "../locale-config/registry.mjs";
 import { validateLocalizedContentIdentities } from "../../src/utils/localizedContentIdentity.mjs";
 import { isTagSegment } from "../../src/utils/localizedTags.mjs";
-import { parseArticle } from "./frontmatter.mjs";
-
-const blogDirectory = "src/data/blog/";
+import { CONTENT_DIRECTORIES, getContentDirectory } from "./targets.mjs";
 
 function isContentPath(value) {
   return (
@@ -50,9 +48,7 @@ export async function readProjectFile(root, relativePath) {
  * @throws {Error} When the content directory redirects outside its expected path.
  */
 export async function scanContentFiles(root, collection) {
-  if (!["blog", "tags"].includes(collection))
-    throw new Error("Unknown content collection");
-  const base = path.resolve(root, "src/data", collection);
+  const base = path.resolve(root, getContentDirectory(collection));
   try {
     await fs.lstat(base);
   } catch (error) {
@@ -107,40 +103,49 @@ function git(root, args) {
   }
 }
 
+function getContentLocation(projectPath) {
+  for (const [kind, directory] of Object.entries(CONTENT_DIRECTORIES)) {
+    if (projectPath.startsWith(directory + "/")) {
+      const file = projectPath.slice(directory.length + 1);
+      if (isContentPath(file)) return { kind, path: file };
+    }
+  }
+}
+
 /**
- * Read one source and the complete tag/configuration reference snapshot.
- * Index mode reads captured blob IDs; working-tree data only determines write conflicts.
+ * Capture one blog or tag source, its locale registry, and required tag metadata.
+ * Index mode reads immutable blob IDs; working-tree files only determine write conflicts.
  * @param {string} root Project root containing locales.config.mjs.
- * @param {{file?: string, staged?: boolean}} selection Explicit file or staged source selection.
- * @returns {Promise<{root: string, source: {path: string, text: string}, registry: ReturnType<typeof validateLocaleRegistry>, files: import("./targets.mjs").FileState[], tagIds: string[]}>} Input for the pure translation kernel.
- * @throws {Error} When selection, paths, frontmatter, or staged entries are invalid.
+ * @param {{file?: string, staged?: boolean}} selection Explicit file or staged source.
+ * @returns Source kind, text, identity catalog, target snapshots, and filesystem collision states.
+ * @throws {Error} When source selection, paths, localized identities, or the index are invalid.
  */
 export async function readTranslationSnapshot(root, selection) {
   if (Boolean(selection.file) === Boolean(selection.staged))
     throw new Error("Provide one source file or --staged");
   root = await fs.realpath(root);
-  const files = await scanContentFiles(root, "blog");
-  let articlePaths = [];
-  let tagPaths = [];
-  let sourceText;
-  let registryText;
-  let sourcePath;
+  const diskFiles = {
+    blog: await scanContentFiles(root, "blog"),
+    tags: await scanContentFiles(root, "tags"),
+  };
+  const entries = new Map();
+  const pathsByKind = { blog: [], tags: [] };
+  const listArgs = [
+    "ls-files",
+    "--stage",
+    "--full-name",
+    "-z",
+    "--",
+    "locales.config.mjs",
+    ...Object.values(CONTENT_DIRECTORIES),
+  ];
+  let index;
+  let sourceProjectPath;
   if (selection.staged) {
     const gitRoot = git(root, ["rev-parse", "--show-toplevel"]).trim();
     if ((await fs.realpath(gitRoot)) !== root)
       throw new Error("Run content:translate from the repository root");
-    const listArgs = [
-      "ls-files",
-      "--stage",
-      "--full-name",
-      "-z",
-      "--",
-      "locales.config.mjs",
-      "src/data/blog",
-      "src/data/tags",
-    ];
-    const index = git(root, listArgs);
-    const entries = new Map();
+    index = git(root, listArgs);
     for (const record of index.split("\0").filter(Boolean)) {
       const match = /^([0-7]{6}) ([a-f0-9]{40,64}) ([0-3])\t([\s\S]+)$/.exec(
         record
@@ -149,19 +154,12 @@ export async function readTranslationSnapshot(root, selection) {
       const [, mode, oid, stage, file] = match;
       if (stage !== "0")
         throw new Error(`Resolve staged conflicts first: ${file}`);
-      const contentRoot = file.startsWith(blogDirectory)
-        ? blogDirectory
-        : file.startsWith("src/data/tags/")
-          ? "src/data/tags/"
-          : undefined;
-      if (
-        file !== "locales.config.mjs" &&
-        (!contentRoot || !isContentPath(file.slice(contentRoot.length)))
-      )
-        continue;
+      const location = getContentLocation(file);
+      if (file !== "locales.config.mjs" && !location) continue;
       if (!/^100(644|755)$/.test(mode))
         throw new Error(`Staged input is not a regular file: ${file}`);
       entries.set(file, oid);
+      if (location) pathsByKind[location.kind].push(location.path);
     }
     const changed = git(root, [
       "diff",
@@ -171,58 +169,45 @@ export async function readTranslationSnapshot(root, selection) {
       "--diff-filter=ACMR",
       "-z",
       "--",
-      "src/data/blog",
+      ...Object.values(CONTENT_DIRECTORIES),
     ])
       .split("\0")
-      .filter(file => file.startsWith(blogDirectory) && entries.has(file));
+      .filter(file => entries.has(file) && getContentLocation(file));
     if (changed.length !== 1)
       throw new Error(
-        `Expected exactly one staged blog source; found ${changed.length}. Candidates: ${changed.join(", ") || "none"}`
+        `Expected exactly one staged blog or tag source; found ${changed.length}. Candidates: ${changed.join(", ") || "none"}`
       );
-    sourcePath = changed[0].slice(blogDirectory.length);
-    const registryId = entries.get("locales.config.mjs");
-    if (!registryId)
-      throw new Error("locales.config.mjs is missing from the Git index");
-    registryText = git(root, ["cat-file", "blob", registryId]);
-    articlePaths = [...entries.keys()]
-      .filter(file => file.startsWith(blogDirectory))
-      .map(file => file.slice(blogDirectory.length));
-    tagPaths = [...entries.keys()]
-      .filter(file => file.startsWith("src/data/tags/"))
-      .map(file => file.slice("src/data/tags/".length));
-    sourceText = git(root, [
-      "cat-file",
-      "blob",
-      entries.get(blogDirectory + sourcePath),
-    ]);
-    if (git(root, listArgs) !== index)
-      throw new Error(
-        "Git index changed while reading; retry with a stable index"
-      );
+    sourceProjectPath = changed[0];
   } else {
-    sourcePath = path
-      .relative(
-        path.join(root, blogDirectory),
-        path.resolve(root, selection.file)
-      )
+    sourceProjectPath = path
+      .relative(root, path.resolve(root, selection.file))
       .split(path.sep)
       .join("/");
-    if (!isContentPath(sourcePath))
-      throw new Error("Source must be a Markdown file inside src/data/blog");
-    // Check the explicit path even if the directory scan skipped a linked ancestor.
-    sourceText = await readProjectFile(root, blogDirectory + sourcePath);
-    registryText = await readProjectFile(root, "locales.config.mjs");
-    articlePaths = files
-      .filter(file => file.kind === "file" && isContentPath(file.path))
-      .map(file => file.path);
-    tagPaths = (await scanContentFiles(root, "tags"))
-      .filter(file => file.kind === "file" && isContentPath(file.path))
-      .map(file => file.path);
-    if (!articlePaths.includes(sourcePath))
-      throw new Error("Source is not a readable blog entry");
+    for (const kind of Object.keys(CONTENT_DIRECTORIES)) {
+      pathsByKind[kind] = diskFiles[kind]
+        .filter(file => file.kind === "file" && isContentPath(file.path))
+        .map(file => file.path);
+    }
   }
-  // Evaluate the captured snapshot, which may differ from the working tree.
-  // Require a self-contained default export: data URLs cannot resolve relative imports.
+  const sourceLocation = getContentLocation(sourceProjectPath);
+  if (!sourceLocation)
+    throw new Error(
+      "Source must be a Markdown file inside src/data/blog or src/data/tags"
+    );
+  const { kind, path: sourcePath } = sourceLocation;
+
+  async function readCapturedText(projectPath) {
+    if (!selection.staged) return readProjectFile(root, projectPath);
+    const oid = entries.get(projectPath);
+    if (!oid) throw new Error(`${projectPath} is missing from the Git index`);
+    return git(root, ["cat-file", "blob", oid]);
+  }
+
+  const sourceText = await readCapturedText(sourceProjectPath);
+  if (!pathsByKind[kind].includes(sourcePath))
+    throw new Error("Source is not a readable content entry");
+  const registryText = await readCapturedText("locales.config.mjs");
+  // The captured registry must be self-contained: data URLs cannot resolve relative imports.
   const { default: config } = await import(
     `data:text/javascript;base64,${Buffer.from(registryText, "utf8").toString("base64")}`
   );
@@ -231,22 +216,44 @@ export async function readTranslationSnapshot(root, selection) {
     defaultLocale: registry.defaultLocale,
     supportedLocales: Object.keys(registry.locales),
   };
-  validateLocalizedContentIdentities(
-    articlePaths.map(file => file.slice(0, -3)),
-    identityConfig
-  );
-  const tagIds = validateLocalizedContentIdentities(
-    tagPaths.map(file => file.slice(0, -3)),
-    identityConfig
-  ).map(item => item.baseId);
+  const identities = {};
+  for (const collection of Object.keys(CONTENT_DIRECTORIES))
+    identities[collection] = validateLocalizedContentIdentities(
+      pathsByKind[collection].map(file => file.slice(0, -3)),
+      identityConfig
+    );
+  const tagIds = identities.tags.map(item => item.baseId);
   for (const id of tagIds)
     if (!isTagSegment(id)) throw new Error(`Invalid tag ID: ${id}`);
-  parseArticle(sourceText);
+
+  const targetTexts = new Map();
+  if (kind === "tags") {
+    const sourceIdentity =
+      identities.tags[pathsByKind.tags.indexOf(sourcePath)];
+    for (const [i, identity] of identities.tags.entries()) {
+      if (
+        identity.baseId !== sourceIdentity.baseId ||
+        identity.locale === sourceIdentity.locale
+      )
+        continue;
+      const target = pathsByKind.tags[i];
+      targetTexts.set(
+        target,
+        await readCapturedText(getContentDirectory(kind) + "/" + target)
+      );
+    }
+  }
+  if (selection.staged && git(root, listArgs) !== index)
+    throw new Error(
+      "Git index changed while reading; retry with a stable index"
+    );
   return {
     root,
+    kind,
     source: { path: sourcePath, text: sourceText },
     registry,
-    files,
+    files: diskFiles[kind],
     tagIds,
+    targetTexts,
   };
 }

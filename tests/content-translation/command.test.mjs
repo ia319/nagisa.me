@@ -12,7 +12,7 @@ import {
   prepareWrites,
   writeTranslations,
 } from "../../scripts/content-translation/write.mjs";
-import { parseArticle } from "../../scripts/content-translation/frontmatter.mjs";
+import { parseContent } from "../../scripts/content-translation/frontmatter.mjs";
 import { memoryFiles } from "./memory-files.mjs";
 import { captureOllamaOutput, mockOllama } from "./mock-ollama.mjs";
 import { mockOllamaPorts } from "./mock-ollama-ports.mjs";
@@ -202,7 +202,7 @@ test("uses configured model and port for every request and records the chosen mo
       )
     );
     for (const locale of ["en", "ar"]) {
-      const output = parseArticle(
+      const output = parseContent(
         entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
       );
       assert.equal(
@@ -334,7 +334,7 @@ test("starts a private service only for real requests and stops it after saved-d
   const ports = mockOllamaPorts(t);
   const servers = mockOllamaSupervisor(t, {
     stop(call) {
-      assert.match(messages.at(-1), /Generated 2 draft/);
+      assert.match(messages.at(-1), /Generated 2 content draft/);
       assert.ok(entries.has(path.join(root, "src/data/blog/post.en.md")));
       assert.ok(entries.has(path.join(root, "src/data/blog/post.ar.md")));
       call.event("stopped");
@@ -409,7 +409,7 @@ test("saves completed responses after service exit and still checks cleanup", as
               message.includes("Content validation: 0 issue")
             )
           );
-          assert.match(messages.at(-1), /Generated 2 draft/);
+          assert.match(messages.at(-1), /Generated 2 content draft/);
         }
       );
 });
@@ -525,7 +525,7 @@ test("retains all saved drafts when final service cleanup cannot be confirmed", 
   );
   for (const locale of ["en", "ar"])
     assert.ok(entries.has(path.join(root, `src/data/blog/post.${locale}.md`)));
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("cancels both model execution and its owned service without writing drafts", async t => {
@@ -662,7 +662,7 @@ test("saves every draft before reporting malformed metadata and never retries ge
     2
   );
   for (const locale of ["en", "ar"]) {
-    const article = parseArticle(
+    const article = parseContent(
       entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
     );
     assert.equal(article.fields.title, "Bonjour");
@@ -675,7 +675,7 @@ test("saves every draft before reporting malformed metadata and never retries ge
     entries.get(path.join(root, "src/data/blog/post.fr.md")).text,
     source
   );
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("separates raw output, draft writes, and content checks even without a model trailing newline", async t => {
@@ -742,7 +742,7 @@ test("labels saving and checking correctly when protected-only content needs no 
     messages.indexOf("\n--- Content checks ---") >
       messages.indexOf("Written: src/data/blog/post.ar.md")
   );
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("generates every target before writing drafts and leaves source text unchanged", async t => {
@@ -762,7 +762,7 @@ test("generates every target before writing drafts and leaves source text unchan
     calls.filter(call => call.args[0] === "run").length
   );
   for (const locale of ["en", "ar"]) {
-    const article = parseArticle(
+    const article = parseContent(
       entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
     );
     assert.equal(article.fields.title, "Hello");
@@ -910,7 +910,7 @@ test("writes every draft before reporting invalid body output and retains the re
   await run();
   assert.equal(mutations.filter(item => item[0] === "link").length, 2);
   for (const locale of ["en", "ar"]) {
-    const article = parseArticle(
+    const article = parseContent(
       entries.get(path.join(root, `src/data/blog/post.${locale}.md`)).text
     );
     assert.equal(article.document.get("draft"), true);
@@ -930,7 +930,7 @@ test("writes every draft before reporting invalid body output and retains the re
   assert.ok(
     messages.some(message => message.includes("[placeholder-unknown]"))
   );
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
   assert.ok(
     Buffer.concat(chunks.stdout)
       .toString("utf8")
@@ -956,7 +956,7 @@ test("reads actual saved drafts for non-blocking structure checks", async t => {
         )
     )
   );
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("retains written drafts when post-write reads fail", async t => {
@@ -976,7 +976,7 @@ test("retains written drafts when post-write reads fail", async t => {
         /post.en.md:.*Review read denied/.test(message)
     )
   );
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("reports missing tag definitions after saving drafts", async t => {
@@ -999,7 +999,7 @@ test("reports missing tag definitions after saving drafts", async t => {
       )
   );
   assert.match(messages[warning], /Missing tag definition.*Outils/);
-  assert.match(messages.at(-1), /Generated 2 draft/);
+  assert.match(messages.at(-1), /Generated 2 content draft/);
 });
 
 test("retains successful writes and reports failed and pending targets", async t => {
@@ -1198,7 +1198,7 @@ test("staged command uses working-tree runtime settings with index language and 
   );
   assert.ok(calls.every(call => call.args[1] === "working-tree:12b"));
   assert.equal(servers[0].stops, 1);
-  const output = parseArticle(
+  const output = parseContent(
     entries.get(path.join(root, "src/data/blog/source.en.md")).text
   );
   assert.equal(output.document.getIn(["translation", "sourceLocale"]), "fr");
@@ -1215,5 +1215,230 @@ test("staged command uses working-tree runtime settings with index language and 
   assert.equal(
     entries.get(path.join(root, "src/data/blog/source.md")).text,
     "Unstaged source must remain unchanged"
+  );
+});
+
+test("writes tag drafts in the tag collection without copying source aliases", async t => {
+  const { run, root, entries, calls, messages } = fixture(t, {
+    "src/data/tags/tools.md": "---\nname: Outils\naliases: [outils]\n---\n",
+    "src/data/blog/tools.md": source,
+  });
+  await run(["src/data/tags/tools.md", "--to", "en", "--model", "example:12b"]);
+  const saved = parseContent(
+    entries.get(path.join(root, "src/data/tags/tools.en.md")).text,
+    "tags"
+  );
+  assert.equal(saved.fields.name, "Tools");
+  assert.equal(saved.document.has("aliases"), false);
+  assert.equal(saved.document.has("description"), false);
+  assert.equal(
+    entries.get(path.join(root, "src/data/blog/tools.md")).text,
+    source
+  );
+  assert.equal(calls.filter(call => call.args[0] === "run").length, 1);
+  assert.ok(messages.includes("Written: src/data/tags/tools.en.md"));
+});
+
+test("force preserves target tag aliases and detects edits before model execution", async t => {
+  for (const changed of [false, true])
+    await t.test(String(changed), async t => {
+      const { run, root, entries, calls, mutations } = fixture(t, {
+        "src/data/tags/tools.md":
+          "---\nname: Outils\naliases: [source-only]\n---\n",
+        "src/data/tags/tools.en.md":
+          "---\nname: Old\naliases: [legacy] # Retain\n---\n",
+      });
+      const target = path.join(root, "src/data/tags/tools.en.md");
+      if (changed) {
+        const read = fs.readFile;
+        let count = 0;
+        t.mock.method(fs, "readFile", async (file, ...options) => {
+          if (file === target && ++count === 2)
+            entries.get(file).text = entries
+              .get(file)
+              .text.replace("legacy", "edited");
+          return read(file, ...options);
+        });
+        await assert.rejects(
+          run([
+            "src/data/tags/tools.md",
+            "--to",
+            "en",
+            "--force",
+            "--model",
+            "example:12b",
+          ]),
+          /Target changed after the input snapshot/
+        );
+        assert.equal(calls.length, 0);
+        assert.deepEqual(mutations, []);
+      } else {
+        await run([
+          "src/data/tags/tools.md",
+          "--to",
+          "en",
+          "--force",
+          "--model",
+          "example:12b",
+        ]);
+        const text = entries.get(target).text;
+        assert.deepEqual(
+          parseContent(text, "tags").document.get("aliases").toJSON(),
+          ["legacy"]
+        );
+        assert.match(text, /# Retain/);
+      }
+    });
+});
+
+test("staged tag force requires an indexed target and matching working-tree aliases", async t => {
+  for (const state of ["matching", "changed", "missing"])
+    await t.test(state, async t => {
+      const sourceText = "---\nname: Outils\naliases: [source-only]\n---\n";
+      const indexedTarget =
+        "---\nname: Indexed target\naliases: [legacy] # Retain\n---\n";
+      const { run, root, entries, mutations, calls } = fixture(t, {
+        "src/data/tags/tools.md": "Unstaged source must not be read",
+        "src/data/tags/tools.en.md": indexedTarget
+          .replace("Indexed target", "Working target")
+          .replace("legacy", state === "changed" ? "new-alias" : "legacy"),
+        "locales.config.mjs": "Unstaged registry must not be read",
+      });
+      const blobs = [
+        ["locales.config.mjs", `export default ${JSON.stringify(registry)};`],
+        ["src/data/tags/tools.md", sourceText],
+        ...(state === "missing"
+          ? []
+          : [["src/data/tags/tools.en.md", indexedTarget]]),
+      ].map(([file, text], index) => ({
+        file,
+        text,
+        oid: String(index + 1).padStart(40, "0"),
+      }));
+      t.mock.method(childProcess, "execFileSync", (_command, args) => {
+        if (args[0] === "rev-parse") return root;
+        if (args[0] === "ls-files")
+          return blobs
+            .map(blob => `100644 ${blob.oid} 0\t${blob.file}\0`)
+            .join("");
+        if (args[0] === "diff") return "src/data/tags/tools.md\0";
+        if (args[0] === "cat-file")
+          return blobs.find(blob => blob.oid === args[2]).text;
+        assert.fail(args.join(" "));
+      });
+      const runArgs = [
+        "--staged",
+        "--to",
+        "en",
+        "--force",
+        "--model",
+        "example:12b",
+      ];
+      if (state === "matching") {
+        await run(runArgs);
+        const saved = parseContent(
+          entries.get(path.join(root, "src/data/tags/tools.en.md")).text,
+          "tags"
+        );
+        assert.equal(saved.fields.name, "Tools");
+        assert.deepEqual(saved.document.get("aliases").toJSON(), ["legacy"]);
+        assert.equal(
+          saved.document.getIn(["translation", "sourceLocale"]),
+          "fr"
+        );
+      } else {
+        await assert.rejects(
+          run(runArgs),
+          state === "missing"
+            ? /missing from the input snapshot/
+            : /aliases differ from the Git index/
+        );
+        assert.deepEqual(mutations, []);
+        assert.equal(calls.length, 0);
+      }
+    });
+});
+
+test("applies target safety, concurrent-edit checks and cancellation to the tag root", async t => {
+  const { root, entries } = memoryFiles(t, {
+    "src/data/tags/tools.md": "---\nname: Outils\n---\n",
+    "src/data/tags/tools.en.md": "---\nname: Tools\n---\n",
+  });
+  await assert.rejects(
+    prepareWrites(root, [], "../outside"),
+    /Unknown content kind/
+  );
+  await assert.rejects(
+    prepareWrites(root, [{ path: "../outside.md", overwrite: false }], "tags"),
+    /Invalid translation target/
+  );
+  const prepared = await prepareWrites(
+    root,
+    [{ path: "tools.en.md", overwrite: true }],
+    "tags"
+  );
+  entries.get(path.join(root, "src/data/tags/tools.en.md")).text =
+    "Edited by user";
+  await assert.rejects(
+    writeTranslations(
+      prepared,
+      [{ path: "tools.en.md", text: "Draft\n" }],
+      () => {},
+      new AbortController().signal
+    ),
+    /changed during translation/
+  );
+  const controller = new AbortController();
+  controller.abort(new Error("Cancel tag translation"));
+  await assert.rejects(
+    writeTranslations(
+      prepared,
+      [{ path: "tools.en.md", text: "Draft\n" }],
+      () => {},
+      controller.signal
+    ),
+    /Cancel tag translation/
+  );
+  assert.equal(
+    entries.get(path.join(root, "src/data/tags/tools.en.md")).text,
+    "Edited by user"
+  );
+});
+
+test("retains completed tag translations after a later target fails", async t => {
+  const { run, root, entries, messages } = fixture(t, {
+    "src/data/tags/tools.md": "---\nname: Outils\n---\n",
+    "src/data/tags/tools.en.md": "---\nname: Old\naliases: [legacy]\n---\n",
+    "src/data/tags/tools.ar.md": "---\nname: Old\n---\n",
+  });
+  const rename = fs.rename;
+  t.mock.method(fs, "rename", async (source, target) => {
+    if (target.endsWith("tools.ar.md"))
+      throw new Error("Blocked tag replacement");
+    return rename(source, target);
+  });
+  await assert.rejects(
+    run([
+      "src/data/tags/tools.md",
+      "--to",
+      "en",
+      "--to",
+      "ar",
+      "--force",
+      "--model",
+      "example:12b",
+    ]),
+    /Blocked tag replacement/
+  );
+  assert.equal(
+    parseContent(
+      entries.get(path.join(root, "src/data/tags/tools.en.md")).text,
+      "tags"
+    ).fields.name,
+    "Tools"
+  );
+  assert.ok(messages.some(message => message === "Completed: tools.en.md"));
+  assert.ok(
+    messages.some(message => message.startsWith("Temporary file retained"))
   );
 });

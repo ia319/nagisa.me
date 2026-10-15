@@ -1,20 +1,25 @@
-import { getTagReferenceDiagnostics } from "../../src/utils/localizedTags.mjs";
+import {
+  getTagReferenceDiagnostics,
+  isTagSegment,
+} from "../../src/utils/localizedTags.mjs";
 import { validateLocaleRegistry } from "../locale-config/registry.mjs";
 import { parseDocument, stringify } from "yaml";
-import { parseArticle, renderArticle } from "./frontmatter.mjs";
+import { parseContent, renderContent } from "./frontmatter.mjs";
 import { prepareMarkdown, restoreMarkdown } from "./markdown.mjs";
 import { updateMarkdownAnchors } from "./markdown-anchors.mjs";
 import { validateMarkdown } from "./markdown-validation.mjs";
 import { buildTranslationPrompt } from "./prompts.mjs";
-import { planTranslationTargets } from "./targets.mjs";
+import { getContentDirectory, planTranslationTargets } from "./targets.mjs";
 
 /**
  * Prepare model requests and same-directory output plans using only snapshots.
- * @param {{source: {path: string, text: string}, registry: unknown, targetLocales: readonly string[], files: readonly import("./targets.mjs").FileState[], tagIds?: readonly string[], model: string, fromLocale?: string, force?: boolean, userPrompt?: string, promptMode?: "append" | "replace"}} input Source, tag identity, and configuration snapshots plus explicit options.
+ * @param {{kind?: "blog" | "tags", targetTexts?: ReadonlyMap<string, string>, source: {path: string, text: string}, registry: unknown, targetLocales: readonly string[], files: readonly import("./targets.mjs").FileState[], tagIds?: readonly string[], model: string, fromLocale?: string, force?: boolean, userPrompt?: string, promptMode?: "append" | "replace"}} input Source, tag identity, and configuration snapshots plus explicit options.
  * @returns Model requests and source data needed for final assembly.
  * @throws {Error} When preflight, frontmatter, tag routes, or prompt options are invalid.
  */
 export function prepareTranslation(input) {
+  const kind = input.kind ?? "blog";
+  const directory = getContentDirectory(kind);
   const registry = validateLocaleRegistry(input.registry);
   if (
     typeof input.model !== "string" ||
@@ -41,18 +46,22 @@ export function prepareTranslation(input) {
     fromLocale: input.fromLocale,
     force: input.force,
   });
-  const article = parseArticle(input.source.text);
-  const markdown = prepareMarkdown(article.body);
+  if (kind === "tags" && !isTagSegment(source.baseId))
+    throw new Error(`Invalid tag ID: ${source.baseId}`);
+  const content = parseContent(input.source.text, kind);
+  const markdown = prepareMarkdown(content.body);
   const diagnostics = [
-    ...getTagReferenceDiagnostics(
-      [
-        {
-          path: `src/data/blog/${input.source.path}`,
-          tags: article.fields.tags,
-        },
-      ],
-      new Set(input.tagIds ?? [])
-    ),
+    ...(kind === "blog"
+      ? getTagReferenceDiagnostics(
+          [
+            {
+              path: `${directory}/${input.source.path}`,
+              tags: content.fields.tags,
+            },
+          ],
+          new Set(input.tagIds ?? [])
+        )
+      : []),
     ...markdown.diagnostics,
   ];
   const requests = [];
@@ -66,10 +75,23 @@ export function prepareTranslation(input) {
     promptMode: input.promptMode,
   });
   const outputs = targets.map(target => {
-    const fields = {
-      title: article.fields.title,
-      description: article.fields.description,
-    };
+    const fields = Object.fromEntries(
+      Object.entries(content.fields).filter(
+        ([, value]) => typeof value === "string"
+      )
+    );
+    let targetAliases;
+    if (kind === "tags" && target.overwrite) {
+      const targetText = input.targetTexts?.get(target.path);
+      if (targetText === undefined)
+        throw new Error(
+          `Target tag file is missing from the input snapshot: ${target.path}; use file mode or synchronize the index before --staged --force`
+        );
+      targetAliases = parseContent(targetText, "tags").document.get(
+        "aliases",
+        true
+      );
+    }
     const metadata = {};
     function request(field, text) {
       const id = `${target.locale}:${field}`;
@@ -93,7 +115,7 @@ export function prepareTranslation(input) {
       });
       return id;
     }
-    for (const field of ["title", "description"]) {
+    for (const field of Object.keys(fields)) {
       if (fields[field].trim()) metadata[field] = fields[field];
     }
     const metadataId = Object.keys(metadata).length
@@ -102,10 +124,12 @@ export function prepareTranslation(input) {
     const bodyId = markdown.needsTranslation
       ? request("body", markdown.text)
       : undefined;
-    return { ...target, fields, metadata, metadataId, bodyId };
+    return { ...target, fields, metadata, metadataId, bodyId, targetAliases };
   });
   return {
-    article,
+    kind,
+    directory,
+    content,
     markdown,
     source,
     sourcePath: input.source.path,
@@ -159,7 +183,7 @@ function readMetadata(output, text) {
 }
 
 /**
- * Assemble draft articles from completed requests without gating on content quality.
+ * Assemble draft content from completed requests without gating on content quality.
  * @param {ReturnType<typeof prepareTranslation>} plan Prepared requests and source snapshot.
  * @param {readonly {id: string, text: string}[]} responses One response for each request.
  * @returns {{files: {path: string, locale: string, overwrite: boolean, text: string}[]}} Complete output set awaiting post-write content review.
@@ -189,10 +213,16 @@ export function completeTranslation(plan, responses) {
       path: output.path,
       locale: output.locale,
       overwrite: output.overwrite,
-      text: renderArticle(plan.article, fields, body, {
-        sourceLocale: plan.source.locale,
-        model: plan.model,
-      }),
+      text: renderContent(
+        plan.content,
+        fields,
+        body,
+        {
+          sourceLocale: plan.source.locale,
+          model: plan.model,
+        },
+        output.targetAliases
+      ),
     };
   });
   return { files };
@@ -202,7 +232,7 @@ export function completeTranslation(plan, responses) {
  * Inspect saved drafts and report content issues without rejecting saved results.
  * @param {ReturnType<typeof prepareTranslation>} plan Source snapshot and requested fields.
  * @param {readonly {id: string, text: string}[]} responses Original model results for placeholder checks.
- * @param {readonly {path: string, text: string}[]} files Article texts read after successful writes.
+ * @param {readonly {path: string, text: string}[]} files Content texts read after successful writes.
  * @returns {{code: string, message: string}[]} Review findings with file, field, and difference details.
  */
 export function validateTranslation(plan, responses, files) {
@@ -217,9 +247,9 @@ export function validateTranslation(plan, responses, files) {
   for (const output of plan.outputs) {
     const file = files.find(file => file.path === output.path);
     if (!file) continue;
-    let article;
+    let content;
     try {
-      article = parseArticle(file.text);
+      content = parseContent(file.text, plan.kind);
     } catch (error) {
       diagnostics.push({
         code: "frontmatter",
@@ -229,26 +259,17 @@ export function validateTranslation(plan, responses, files) {
     }
     const metadata = readMetadata(output, results.get(output.metadataId));
     for (const diagnostic of metadata.diagnostics) {
-      const sourcePoint = plan.article.fieldPositions[diagnostic.field];
-      const targetPoint = article.fieldPositions[diagnostic.field];
+      const sourcePoint = plan.content.fieldPositions[diagnostic.field];
+      const targetPoint = content.fieldPositions[diagnostic.field];
       diagnostics.push({
         code: diagnostic.code,
-        message: `src/data/blog/${output.path}${targetPoint ? `:${targetPoint.line}:${targetPoint.column}` : ""}: ${diagnostic.message}\n  Source: src/data/blog/${plan.sourcePath}${sourcePoint ? `:${sourcePoint.line}:${sourcePoint.column}` : ""}`,
+        message: `${plan.directory}/${output.path}${targetPoint ? `:${targetPoint.line}:${targetPoint.column}` : ""}: ${diagnostic.message}\n  Source: ${plan.directory}/${plan.sourcePath}${sourcePoint ? `:${sourcePoint.line}:${sourcePoint.column}` : ""}`,
       });
     }
-    const fields = [];
     for (const field of Object.keys(output.metadata)) {
-      fields.push({
-        name: field,
-        key: field,
-        source: plan.article.fields[field],
-        value: article.fields[field],
-      });
-    }
-    for (const field of fields) {
-      const point = article.fieldPositions[field.key];
-      const location = `src/data/blog/${output.path}${point ? `:${point.line}:${point.column}` : ""}: ${field.name}`;
-      const text = field.value;
+      const point = content.fieldPositions[field];
+      const location = `${plan.directory}/${output.path}${point ? `:${point.line}:${point.column}` : ""}: ${field}`;
+      const text = content.fields[field];
       if (typeof text !== "string" || !text.trim()) {
         diagnostics.push({
           code: "field-empty",
@@ -263,14 +284,14 @@ export function validateTranslation(plan, responses, files) {
           code: "control-character",
           message: `${location}, character ${match.index + 1}: unexpected U+${match[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
         });
-      if (field.key !== "description" && /[\r\n]/.test(text))
+      if (field !== "description" && /[\r\n]/.test(text))
         diagnostics.push({
           code: "field-newline",
           message: `${location} must be a single line; received ${JSON.stringify(text)}`,
         });
-      const sourceTokens = [...field.source.matchAll(/__KEEP_\d+_\d+__/g)].map(
-        match => match[0]
-      );
+      const sourceTokens = [
+        ...plan.content.fields[field].matchAll(/__KEEP_\d+_\d+__/g),
+      ].map(match => match[0]);
       for (const match of text.matchAll(/__KEEP_\d+_\d+__/g)) {
         const index = sourceTokens.indexOf(match[0]);
         if (index >= 0) sourceTokens.splice(index, 1);
@@ -292,24 +313,24 @@ export function validateTranslation(plan, responses, files) {
     for (const diagnostic of validateMarkdown(
       plan.markdown,
       translatedBody,
-      article.body
+      content.body
     )) {
       const sourcePoint = diagnostic.source;
       const targetPoint = diagnostic.target;
       diagnostics.push({
         code: diagnostic.code,
         message:
-          `src/data/blog/${output.path}${targetPoint ? `:${article.bodyLine + targetPoint.line - 1}:${targetPoint.column}` : " (target location unavailable)"}: ${diagnostic.details.length} related finding(s)` +
-          `\n  Source: src/data/blog/${plan.sourcePath}${sourcePoint ? `:${plan.article.bodyLine + sourcePoint.line - 1}:${sourcePoint.column}` : " (no corresponding source node)"}` +
+          `${plan.directory}/${output.path}${targetPoint ? `:${content.bodyLine + targetPoint.line - 1}:${targetPoint.column}` : " (target location unavailable)"}: ${diagnostic.details.length} related finding(s)` +
+          `\n  Source: ${plan.directory}/${plan.sourcePath}${sourcePoint ? `:${plan.content.bodyLine + sourcePoint.line - 1}:${sourcePoint.column}` : " (no corresponding source node)"}` +
           diagnostic.details
             .map(
               item =>
                 `\n  - [${item.code}] ${item.message}\n    ` +
                 (item.source
-                  ? `source src/data/blog/${plan.sourcePath}:${plan.article.bodyLine + item.source.line - 1}:${item.source.column}`
+                  ? `source ${plan.directory}/${plan.sourcePath}:${plan.content.bodyLine + item.source.line - 1}:${item.source.column}`
                   : "source location unavailable") +
                 (item.target
-                  ? `; saved src/data/blog/${output.path}:${article.bodyLine + item.target.line - 1}:${item.target.column}`
+                  ? `; saved ${plan.directory}/${output.path}:${content.bodyLine + item.target.line - 1}:${item.target.column}`
                   : "; saved location unavailable")
             )
             .join("") +
@@ -317,13 +338,14 @@ export function validateTranslation(plan, responses, files) {
       });
     }
     if (
-      article.document.has("tags") !== plan.article.document.has("tags") ||
-      JSON.stringify(article.fields.tags) !==
-        JSON.stringify(plan.article.fields.tags)
+      plan.kind === "blog" &&
+      (content.document.has("tags") !== plan.content.document.has("tags") ||
+        JSON.stringify(content.fields.tags) !==
+          JSON.stringify(plan.content.fields.tags))
     ) {
       diagnostics.push({
         code: "tags-modified",
-        message: `src/data/blog/${output.path}: saved tags differ from the source IDs`,
+        message: `${plan.directory}/${output.path}: saved tags differ from the source IDs`,
       });
     }
   }
