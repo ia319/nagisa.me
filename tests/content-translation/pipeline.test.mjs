@@ -91,7 +91,7 @@ test("keeps source metadata and completed body when JSON is unreadable without r
     );
     assert.match(
       warning.message,
-      /Requested fields remain untranslated: title, description, tags/
+      /Requested fields remain untranslated: title, description/
     );
     assert.equal(plan.requests.length, 2);
   }
@@ -118,7 +118,7 @@ test("applies valid metadata fields only and never copies unexpected model keys"
     const article = parseArticle(result.files[0].text);
     assert.equal(article.fields.title, "Setup");
     assert.equal(article.fields.description, "Exemple");
-    assert.deepEqual(article.fields.tags, ["Astro", "Tools"]);
+    assert.deepEqual(article.fields.tags, ["Astro", "Outils"]);
     assert.equal(article.document.get("author"), "Private Author");
     assert.equal(article.document.get("draft"), true);
     const warnings = validateTranslation(plan, responses, result.files);
@@ -131,32 +131,18 @@ test("applies valid metadata fields only and never copies unexpected model keys"
     );
     assert.equal(
       warnings.filter(item => item.code === "metadata-extra-field").length,
-      2
+      3
     );
   }
 });
 
-test("withholds mapped tags and preserves indices when remaining tag output is invalid", () => {
-  const plan = prepareTranslation({
-    ...input,
-    targetLocales: ["en"],
-    references: [
-      { baseId: "reference", locale: "fr", tags: ["Astro"] },
-      {
-        baseId: "reference",
-        locale: "en",
-        tags: ["Astro framework"],
-        translation: { sourceLocale: "fr" },
-      },
-    ],
-  });
+test("never requests tags and ignores every model tag value", () => {
+  const plan = prepareTranslation({ ...input, targetLocales: ["en"] });
   assert.deepEqual(parse(plan.requests[0].text), {
     title: "Installation",
     description: "Exemple",
-    tags: ["Outils"],
   });
-  assert.deepEqual(plan.outputs[0].tagIndices, [1]);
-  for (const tags of [[], ["Wrong", "Count"], null, [null], [""]]) {
+  for (const tags of [[], ["Changed"], null, [null], [""]]) {
     const responses = plan.requests.map(request =>
       request.field === "metadata"
         ? {
@@ -171,12 +157,12 @@ test("withholds mapped tags and preserves indices when remaining tag output is i
     );
     const result = completeTranslation(plan, responses);
     assert.deepEqual(parseArticle(result.files[0].text).fields.tags, [
-      "Astro framework",
+      "Astro",
       "Outils",
     ]);
     assert.ok(
-      validateTranslation(plan, responses, result.files).some(item =>
-        ["metadata-tags", "metadata-field"].includes(item.code)
+      validateTranslation(plan, responses, result.files).some(
+        item => item.code === "metadata-extra-field"
       )
     );
   }
@@ -187,7 +173,6 @@ test("round-trips translated JSON strings through YAML including punctuation and
   const fields = {
     title: 'Title: "quoted" \\ path 日本語',
     description: 'First line\nSecond: "quoted"\nThird \\ line',
-    tags: ["Astro", "Tools: CLI"],
   };
   const responses = plan.requests.map(request =>
     request.field === "metadata"
@@ -195,7 +180,10 @@ test("round-trips translated JSON strings through YAML including punctuation and
       : translate(request)
   );
   const result = completeTranslation(plan, responses);
-  assert.deepEqual(parseArticle(result.files[0].text).fields, fields);
+  assert.deepEqual(parseArticle(result.files[0].text).fields, {
+    ...fields,
+    tags: ["Astro", "Outils"],
+  });
   assert.deepEqual(validateTranslation(plan, responses, result.files), []);
 });
 
@@ -283,7 +271,7 @@ test("assembles all targets from model text without exposing copied metadata", (
   for (const file of result.files) {
     const output = parseArticle(file.text);
     assert.equal(output.fields.title, "Setup");
-    assert.deepEqual(output.fields.tags, ["Astro", "Tools"]);
+    assert.deepEqual(output.fields.tags, ["Astro", "Outils"]);
     assert.equal(output.document.get("draft"), true);
     assert.equal(output.document.has("canonicalURL"), false);
     assert.deepEqual(output.document.get("translation").toJSON(), {
@@ -313,64 +301,49 @@ test("assembles all targets from model text without exposing copied metadata", (
   );
 });
 
-test("reuses unique tag translations and keeps original positional order", () => {
-  const references = [
-    { baseId: "reference", locale: "fr", tags: ["Astro", "Outils"] },
-    {
-      baseId: "reference",
-      locale: "en",
-      tags: ["Astro", "Tools"],
-      translation: { sourceLocale: "fr" },
-    },
-  ];
-  const plan = prepareTranslation({
-    ...input,
-    targetLocales: ["en"],
-    references,
-  });
-  assert.equal(plan.requests.length, 2);
-  assert.deepEqual(Object.keys(parse(plan.requests[0].text)), [
-    "title",
-    "description",
-  ]);
-  assert.deepEqual(
-    parseArticle(
-      completeTranslation(plan, plan.requests.map(translate)).files[0].text
-    ).fields.tags,
-    ["Astro", "Tools"]
-  );
+test("preserves tag presence, order, duplicates, and YAML comments", () => {
+  for (const tags of [
+    "tags: [Outils, Astro, Outils] # Stable IDs",
+    "tags:\n  - Outils # First\n  - Astro\n  - Outils",
+  ]) {
+    const plan = prepareTranslation({
+      ...input,
+      targetLocales: ["en"],
+      source: {
+        ...input.source,
+        text: "---\ntitle: A\ndescription: B\n" + tags + "\n---\n",
+      },
+    });
+    const result = completeTranslation(plan, plan.requests.map(translate));
+    assert.deepEqual(parseArticle(result.files[0].text).fields.tags, [
+      "Outils",
+      "Astro",
+      "Outils",
+    ]);
+    assert.equal(
+      parseArticle(result.files[0].text).document.get("tags", true).toString(),
+      plan.article.document.get("tags", true).toString()
+    );
+    assert.match(result.files[0].text, /# Stable IDs|# First/);
+    assert.deepEqual(Object.keys(parse(plan.requests[0].text)), [
+      "title",
+      "description",
+    ]);
+  }
 });
 
-test("reports ambiguous references and requests a fresh tag translation", () => {
-  const references = [
-    { baseId: "a", locale: "fr", tags: ["Outils"] },
-    {
-      baseId: "a",
-      locale: "en",
-      tags: ["Tools"],
-      translation: { sourceLocale: "fr" },
-    },
-    { baseId: "b", locale: "fr", tags: ["Outils"] },
-    {
-      baseId: "b",
-      locale: "en",
-      tags: ["Utilities"],
-      translation: { sourceLocale: "fr" },
-    },
-  ];
-  const plan = prepareTranslation({
-    ...input,
-    targetLocales: ["en"],
-    references,
-  });
+test("diagnoses unknown tag IDs with the source path while preparing drafts", () => {
+  const plan = prepareTranslation({ ...input, tagIds: ["Astro"] });
+  assert.equal(
+    plan.diagnostics.filter(item => item.code === "missing-tag-definition")
+      .length,
+    1
+  );
   assert.ok(
-    plan.requests.some(
-      request =>
-        request.field === "metadata" &&
-        parse(request.text).tags.includes("Outils")
+    plan.diagnostics.some(item =>
+      /Outils.*guides\/post.fr.md/.test(item.message)
     )
   );
-  assert.ok(plan.diagnostics.some(item => item.code === "ambiguous-mapping"));
 });
 
 test("requires exactly one valid response per request and returns no partial set", () => {
@@ -431,18 +404,17 @@ test("assembles invalid model bodies and reports missing content without rejecti
   );
 });
 
-test("reports model-generated tag route collisions after assembling drafts", () => {
-  const plan = prepareTranslation({
-    ...input,
-    targetLocales: ["en"],
-    references: [{ baseId: "another", locale: "en", tags: ["tools"] }],
-  });
+test("detects edits to copied tags in saved drafts", () => {
+  const plan = prepareTranslation({ ...input, targetLocales: ["en"] });
   const responses = plan.requests.map(translate);
   const result = completeTranslation(plan, responses);
+  result.files[0].text = result.files[0].text.replace(
+    "  - Outils",
+    "  - tools"
+  );
   assert.ok(
     validateTranslation(plan, responses, result.files).some(
-      item =>
-        item.code === "tag-route" && /Tag route collision/.test(item.message)
+      item => item.code === "tags-modified"
     )
   );
 });
@@ -690,7 +662,7 @@ test("keeps malformed field output as draft data and reports field, position, an
       request.field === "metadata"
         ? JSON.stringify({
             title: "Title\nMore __KEEP_999_999__",
-            description: "```yaml\nExample\n```",
+            description: "```yaml\nExample\u0000\n```",
             tags: ["Tools\nextra\u0000", "Tools"],
           })
         : translate(request).text,
@@ -717,9 +689,7 @@ test("keeps malformed field output as draft data and reports field, position, an
     )
   );
   assert.ok(
-    diagnostics.some(item =>
-      /tags\[0\], character 12.*U\+0000/.test(item.message)
-    )
+    diagnostics.some(item => /description.*U\+0000/.test(item.message))
   );
 });
 
@@ -744,7 +714,7 @@ test("checks the saved text and reports unreadable frontmatter without throwing"
   }));
   assert.deepEqual(
     validateTranslation(plan, responses, invalid).map(item => item.code),
-    ["frontmatter", "tag-check-skipped"]
+    ["frontmatter"]
   );
 });
 

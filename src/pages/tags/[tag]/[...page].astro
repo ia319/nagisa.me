@@ -1,29 +1,44 @@
 ---
 import { getCollection } from "astro:content";
 import type { GetStaticPathsOptions } from "astro";
-import getUniqueTags from "@/utils/getUniqueTags";
+import { getTagIndex } from "@/utils/getTagIndex";
 import getPostsByTag from "@/utils/getPostsByTag";
 import { DEFAULT_LOCALE } from "@/i18n/config";
 import { getLocalizedPath } from "@/i18n/routes";
 import { SITE } from "@/config";
 
 export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
-  const posts = await getCollection("blog");
-  const tags = getUniqueTags(posts, DEFAULT_LOCALE);
-
-  return tags.flatMap(({ tag, tagName }) => {
-    const tagPosts = getPostsByTag(posts, tag, DEFAULT_LOCALE);
-
-    return paginate(tagPosts, {
-      params: { tag },
-      props: {
-        tagName,
-        redirectPath: getLocalizedPath(DEFAULT_LOCALE, "/tags/"),
-      },
-      pageSize: SITE.postPerPage,
+  const index = getTagIndex(
+    await getCollection("blog"),
+    await getCollection("tags")
+  );
+  return index.tags
+    .filter(item => item.locale === DEFAULT_LOCALE)
+    .flatMap(({ tag }) => {
+      const segments = [
+        tag,
+        ...index.aliases
+          .filter(alias => alias.locale === DEFAULT_LOCALE && alias.tag === tag)
+          .map(alias => alias.alias),
+      ];
+      return segments.flatMap(segment =>
+        paginate(getPostsByTag(index.posts, tag, DEFAULT_LOCALE), {
+          params: { tag: segment },
+          props: {
+            redirectPath: getLocalizedPath(
+              DEFAULT_LOCALE,
+              `/tags/${encodeURIComponent(tag)}`
+            ),
+          },
+          pageSize: SITE.postPerPage,
+        })
+      );
     });
-  });
 }
 
-return Astro.redirect(Astro.props.redirectPath);
+const { page, redirectPath } = Astro.props;
+return Astro.redirect(
+  `${redirectPath}${page.currentPage > 1 ? "/" + page.currentPage : ""}`,
+  301
+);
 ---

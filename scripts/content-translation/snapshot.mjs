@@ -3,6 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { validateLocaleRegistry } from "../locale-config/registry.mjs";
 import { validateLocalizedContentIdentities } from "../../src/utils/localizedContentIdentity.mjs";
+import { isTagSegment } from "../../src/utils/localizedTags.mjs";
 import { parseArticle } from "./frontmatter.mjs";
 
 const blogDirectory = "src/data/blog/";
@@ -42,19 +43,28 @@ export async function readProjectFile(root, relativePath) {
 }
 
 /**
- * Capture actual blog entries, including non-content targets, without following links.
+ * Capture actual content entries, including non-content targets, without following links.
  * @param {string} root Canonical project root.
- * @returns {Promise<import("./targets.mjs").FileState[]>} Blog-relative collision snapshot.
- * @throws {Error} When the blog directory redirects outside its expected path.
+ * @param {"blog" | "tags"} collection Allowed content root.
+ * @returns {Promise<import("./targets.mjs").FileState[]>} Collection-relative collision snapshot.
+ * @throws {Error} When the content directory redirects outside its expected path.
  */
-export async function scanBlogFiles(root) {
-  const base = path.resolve(root, blogDirectory);
+export async function scanContentFiles(root, collection) {
+  if (!["blog", "tags"].includes(collection))
+    throw new Error("Unknown content collection");
+  const base = path.resolve(root, "src/data", collection);
+  try {
+    await fs.lstat(base);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   if (
     (await fs.realpath(base)) !== base ||
     !(await fs.lstat(base)).isDirectory()
   )
     throw new Error(
-      "Blog directory must be a regular directory without symbolic links"
+      "Content directory must be a regular directory without symbolic links"
     );
   /** @type {import("./targets.mjs").FileState[]} */
   const files = [];
@@ -64,7 +74,9 @@ export async function scanBlogFiles(root) {
     for (const entry of entries) {
       const relativePath = prefix + entry.name;
       if (!entry.isSymbolicLink() && !entry.isDirectory() && !entry.isFile())
-        throw new Error(`Unsupported blog filesystem entry: ${relativePath}`);
+        throw new Error(
+          `Unsupported content filesystem entry: ${relativePath}`
+        );
       const kind = entry.isSymbolicLink()
         ? "symlink"
         : entry.isDirectory()
@@ -100,15 +112,17 @@ function git(root, args) {
  * Index mode reads captured blob IDs; working-tree data only determines write conflicts.
  * @param {string} root Project root containing locales.config.mjs.
  * @param {{file?: string, staged?: boolean}} selection Explicit file or staged source selection.
- * @returns {Promise<{root: string, source: {path: string, text: string}, registry: ReturnType<typeof validateLocaleRegistry>, files: import("./targets.mjs").FileState[], references: import("../../src/utils/localizedTags.mjs").LocalizedTagContent[]}>} Input for the pure translation kernel.
+ * @returns {Promise<{root: string, source: {path: string, text: string}, registry: ReturnType<typeof validateLocaleRegistry>, files: import("./targets.mjs").FileState[], tagIds: string[]}>} Input for the pure translation kernel.
  * @throws {Error} When selection, paths, frontmatter, or staged entries are invalid.
  */
 export async function readTranslationSnapshot(root, selection) {
   if (Boolean(selection.file) === Boolean(selection.staged))
     throw new Error("Provide one source file or --staged");
   root = await fs.realpath(root);
-  const files = await scanBlogFiles(root);
-  const articles = new Map();
+  const files = await scanContentFiles(root, "blog");
+  let articlePaths = [];
+  let tagPaths = [];
+  let sourceText;
   let registryText;
   let sourcePath;
   if (selection.staged) {
@@ -123,6 +137,7 @@ export async function readTranslationSnapshot(root, selection) {
       "--",
       "locales.config.mjs",
       "src/data/blog",
+      "src/data/tags",
     ];
     const index = git(root, listArgs);
     const entries = new Map();
@@ -134,12 +149,15 @@ export async function readTranslationSnapshot(root, selection) {
       const [, mode, oid, stage, file] = match;
       if (stage !== "0")
         throw new Error(`Resolve staged conflicts first: ${file}`);
+      const contentRoot = file.startsWith(blogDirectory)
+        ? blogDirectory
+        : file.startsWith("src/data/tags/")
+          ? "src/data/tags/"
+          : undefined;
       if (
         file !== "locales.config.mjs" &&
-        !isContentPath(file.slice(blogDirectory.length))
+        (!contentRoot || !isContentPath(file.slice(contentRoot.length)))
       )
-        continue;
-      if (!file.startsWith(blogDirectory) && file !== "locales.config.mjs")
         continue;
       if (!/^100(644|755)$/.test(mode))
         throw new Error(`Staged input is not a regular file: ${file}`);
@@ -166,13 +184,17 @@ export async function readTranslationSnapshot(root, selection) {
     if (!registryId)
       throw new Error("locales.config.mjs is missing from the Git index");
     registryText = git(root, ["cat-file", "blob", registryId]);
-    for (const [file, oid] of entries) {
-      if (file.startsWith(blogDirectory))
-        articles.set(
-          file.slice(blogDirectory.length),
-          git(root, ["cat-file", "blob", oid])
-        );
-    }
+    articlePaths = [...entries.keys()]
+      .filter(file => file.startsWith(blogDirectory))
+      .map(file => file.slice(blogDirectory.length));
+    tagPaths = [...entries.keys()]
+      .filter(file => file.startsWith("src/data/tags/"))
+      .map(file => file.slice("src/data/tags/".length));
+    sourceText = git(root, [
+      "cat-file",
+      "blob",
+      entries.get(blogDirectory + sourcePath),
+    ]);
     if (git(root, listArgs) !== index)
       throw new Error(
         "Git index changed while reading; retry with a stable index"
@@ -188,18 +210,15 @@ export async function readTranslationSnapshot(root, selection) {
     if (!isContentPath(sourcePath))
       throw new Error("Source must be a Markdown file inside src/data/blog");
     // Check the explicit path even if the directory scan skipped a linked ancestor.
-    const sourceText = await readProjectFile(root, blogDirectory + sourcePath);
+    sourceText = await readProjectFile(root, blogDirectory + sourcePath);
     registryText = await readProjectFile(root, "locales.config.mjs");
-    for (const file of files) {
-      if (file.kind === "file" && isContentPath(file.path))
-        articles.set(
-          file.path,
-          file.path === sourcePath
-            ? sourceText
-            : await readProjectFile(root, blogDirectory + file.path)
-        );
-    }
-    if (!articles.has(sourcePath))
+    articlePaths = files
+      .filter(file => file.kind === "file" && isContentPath(file.path))
+      .map(file => file.path);
+    tagPaths = (await scanContentFiles(root, "tags"))
+      .filter(file => file.kind === "file" && isContentPath(file.path))
+      .map(file => file.path);
+    if (!articlePaths.includes(sourcePath))
       throw new Error("Source is not a readable blog entry");
   }
   // Evaluate the captured snapshot, which may differ from the working tree.
@@ -208,34 +227,26 @@ export async function readTranslationSnapshot(root, selection) {
     `data:text/javascript;base64,${Buffer.from(registryText, "utf8").toString("base64")}`
   );
   const registry = validateLocaleRegistry(config);
-  const paths = [...articles.keys()];
-  const identities = validateLocalizedContentIdentities(
-    paths.map(file => file.slice(0, -3)),
-    {
-      defaultLocale: registry.defaultLocale,
-      supportedLocales: Object.keys(registry.locales),
-    }
+  const identityConfig = {
+    defaultLocale: registry.defaultLocale,
+    supportedLocales: Object.keys(registry.locales),
+  };
+  validateLocalizedContentIdentities(
+    articlePaths.map(file => file.slice(0, -3)),
+    identityConfig
   );
-  const references = paths.map((file, index) => {
-    const article = parseArticle(articles.get(file));
-    const sourceLocale = article.document.getIn([
-      "translation",
-      "sourceLocale",
-    ]);
-    return {
-      baseId: identities[index].baseId,
-      locale: identities[index].locale,
-      tags: article.fields.tags,
-      ...(typeof sourceLocale === "string"
-        ? { translation: { sourceLocale } }
-        : {}),
-    };
-  });
+  const tagIds = validateLocalizedContentIdentities(
+    tagPaths.map(file => file.slice(0, -3)),
+    identityConfig
+  ).map(item => item.baseId);
+  for (const id of tagIds)
+    if (!isTagSegment(id)) throw new Error(`Invalid tag ID: ${id}`);
+  parseArticle(sourceText);
   return {
     root,
-    source: { path: sourcePath, text: articles.get(sourcePath) },
+    source: { path: sourcePath, text: sourceText },
     registry,
     files,
-    references,
+    tagIds,
   };
 }

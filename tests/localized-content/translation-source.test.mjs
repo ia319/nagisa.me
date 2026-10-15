@@ -82,7 +82,7 @@ sources.set(bodyFile, "<p>Article body</p>");
 const bodyUrl = await componentUrl(bodyFile);
 sources.set(
   "astro:content",
-  `import Content from ${JSON.stringify(bodyUrl)}; export async function render() { return { Content }; }`
+  `import Content from ${JSON.stringify(bodyUrl)}; export async function render() { return { Content }; } export async function getCollection() { return []; }`
 );
 const iconFile = path.join(
   siteRoot,

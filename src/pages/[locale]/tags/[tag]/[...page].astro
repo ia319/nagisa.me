@@ -10,6 +10,7 @@ import Pagination from "@/components/Pagination.astro";
 import { getTagIndex, getTagLanguageLinks } from "@/utils/getTagIndex";
 import getPostsByTag from "@/utils/getPostsByTag";
 import type { Locale } from "@/i18n/config";
+import { getLocalizedPath } from "@/i18n/routes";
 import { t } from "@/i18n/ui";
 import { SITE } from "@/config";
 
@@ -17,6 +18,7 @@ type Props = {
   locale: Locale;
   page: Page<CollectionEntry<"blog">>;
   tagName: string;
+  redirectTag?: string;
   languageLinks: Partial<Record<Locale, string>>;
 };
 
@@ -27,32 +29,49 @@ type Props = {
  * @throws {Error} When content identities or public tag routes conflict.
  */
 export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
-  const index = getTagIndex(await getCollection("blog"));
-  for (const diagnostic of index.relations.diagnostics) {
+  const index = getTagIndex(
+    await getCollection("blog"),
+    await getCollection("tags")
+  );
+  for (const diagnostic of index.diagnostics) {
     process.stderr.write(`[tags] ${diagnostic.message}\n`);
   }
 
   return index.tags.flatMap(tagRoute => {
     const { locale, tag, tagName } = tagRoute;
     const tagPosts = getPostsByTag(index.posts, tag, locale);
-    const { links: languageLinks, diagnostics } = getTagLanguageLinks(
-      index,
-      tagRoute
+    const languageLinks = getTagLanguageLinks(index, tagRoute);
+    const routes = [
+      { segment: tag },
+      ...index.aliases
+        .filter(alias => alias.locale === locale && alias.tag === tag)
+        .map(alias => ({ segment: alias.alias, redirectTag: tag })),
+    ];
+    return routes.flatMap(route =>
+      paginate(tagPosts, {
+        params: { locale, tag: route.segment },
+        props: {
+          locale,
+          tagName,
+          languageLinks,
+          redirectTag: "redirectTag" in route ? route.redirectTag : undefined,
+        },
+        pageSize: SITE.postPerPage,
+      })
     );
-    for (const diagnostic of diagnostics) {
-      process.stderr.write(`[tags] ${diagnostic}\n`);
-    }
-
-    return paginate(tagPosts, {
-      params: { locale, tag },
-      props: { locale, tagName, languageLinks },
-      pageSize: SITE.postPerPage,
-    });
   });
 }
 
 const tag = Astro.params.tag ?? "";
-const { page, locale, tagName, languageLinks } = Astro.props;
+const { page, locale, tagName, languageLinks, redirectTag } = Astro.props;
+if (redirectTag)
+  return Astro.redirect(
+    getLocalizedPath(
+      locale,
+      `/tags/${encodeURIComponent(redirectTag)}/${page.currentPage > 1 ? page.currentPage + "/" : ""}`
+    ),
+    301
+  );
 ---
 
 <Layout

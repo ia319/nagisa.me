@@ -114,6 +114,7 @@ test("switches configuration, content filenames, and deployment in order", async
     "src/data/blog/.hidden/guide.md": "ignored\n",
     "src/data/blog/_guides/指南.md": markdown,
     "src/data/pages/about.md": markdown,
+    "src/data/tags/tools.md": markdown,
     "src/data/pages/about.en.md": "English page\n",
   });
   const messages = [];
@@ -130,6 +131,7 @@ test("switches configuration, content filenames, and deployment in order", async
     "blog/releases/version.2",
     "blog/_guides/指南",
     "pages/about",
+    "tags/tools",
   ]) {
     assert.equal(
       await fs.readFile(path.join(root, `src/data/${name}.fr.md`), "utf8"),

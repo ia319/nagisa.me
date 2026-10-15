@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   readTranslationSnapshot,
-  scanBlogFiles,
+  scanContentFiles,
 } from "../../scripts/content-translation/snapshot.mjs";
 import { memoryFiles } from "./memory-files.mjs";
 
@@ -46,10 +46,11 @@ function indexMock(t, root, contents, changed) {
   return calls;
 }
 
-test("reads explicit content and draft references from one working-tree snapshot", async t => {
+test("reads only explicit article text and tag identities from the working tree", async t => {
   const { root } = memoryFiles(t, {
     "locales.config.mjs": registry("fr"),
     "src/data/blog/nested/post.md": source,
+    "src/data/tags/Outils.md": "---\nname: Outils\n---\n",
     "src/data/blog/reference.ar.md": source.replace(
       "tags: [Outils]",
       "draft: true\ntags: [أدوات]"
@@ -67,12 +68,11 @@ test("reads explicit content and draft references from one working-tree snapshot
   assert.equal(result.source.path, "nested/post.md");
   assert.equal(result.source.text, source);
   assert.equal(result.registry.defaultLocale, "fr");
-  assert.equal(result.references.length, 2);
-  assert.ok(result.references.some(item => item.locale === "ar"));
+  assert.deepEqual(result.tagIds, ["Outils"]);
   assert.ok(result.files.some(item => item.path === "asset.png"));
 });
 
-test("reads staged source, unchanged references, and configuration by captured blob IDs", async t => {
+test("reads staged source and configuration blobs without reading unrelated articles", async t => {
   const { root, reads } = memoryFiles(t, {
     "locales.config.mjs": registry("en"),
     "src/data/blog/post.md": source.replace("Bonjour", "Unstaged"),
@@ -90,16 +90,15 @@ test("reads staged source, unchanged references, and configuration by captured b
       "src/data/blog/post.md": source,
       "src/data/blog/ref.md": source,
       "src/data/blog/ref.en.md": stagedReference,
+      "src/data/tags/Outils.md": "---\nname: Outils\n---\n",
     },
     ["src/data/blog/post.md"]
   );
   const result = await readTranslationSnapshot(root, { staged: true });
   assert.equal(result.source.text, source);
   assert.equal(result.registry.defaultLocale, "fr");
-  assert.equal(result.references.length, 3);
-  assert.deepEqual(result.references.find(item => item.locale === "en").tags, [
-    "Tools",
-  ]);
+  assert.deepEqual(result.tagIds, ["Outils"]);
+  assert.equal(calls.filter(args => args[0] === "cat-file").length, 2);
   assert.deepEqual(reads, []);
   assert.ok(
     calls.some(args => args[0] === "diff" && args.includes("--no-renames"))
@@ -197,7 +196,7 @@ test("rejects unsafe sources and preserves non-regular targets in the collision 
   ]) {
     await assert.rejects(readTranslationSnapshot(root, { file }));
   }
-  const files = await scanBlogFiles(root);
+  const files = await scanContentFiles(root, "blog");
   assert.ok(
     files.some(file => file.path === "a.en.md" && file.kind === "directory")
   );
@@ -208,10 +207,13 @@ test("rejects unsafe sources and preserves non-regular targets in the collision 
     kind: "directory",
     target: "outside",
   });
-  await assert.rejects(scanBlogFiles(root), /without symbolic links/);
+  await assert.rejects(
+    scanContentFiles(root, "blog"),
+    /without symbolic links/
+  );
 });
 
-test("rejects duplicate localized identities and invalid frontmatter before model work", async t => {
+test("rejects duplicate identities but does not parse unrelated article bodies", async t => {
   const { root, entries } = memoryFiles(t, {
     "locales.config.mjs": registry("fr"),
     "src/data/blog/a.md": source,
@@ -229,8 +231,9 @@ test("rejects duplicate localized identities and invalid frontmatter before mode
     kind: "file",
     text: registry("en"),
   });
-  await assert.rejects(
-    readTranslationSnapshot(root, { file: "src/data/blog/a.md" }),
-    /frontmatter/
+  assert.equal(
+    (await readTranslationSnapshot(root, { file: "src/data/blog/a.md" })).source
+      .text,
+    source
   );
 });

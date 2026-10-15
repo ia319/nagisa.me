@@ -21,8 +21,8 @@ Options:
   -h, --help           Show help and exit
 
 Input:
-  File mode uses the working-tree source, references, and locale registry.
-  --staged reads the source, all tracked blog references, and locales.config.mjs
+  File mode uses the working-tree source, tag definition filenames, and locale registry.
+  --staged reads the source, tag definition filenames, and locales.config.mjs
   from Git index. Zero or multiple changed source articles stop the command.
   Output conflict checks always use the working tree.
   The source language comes from the filename suffix, or the configured default

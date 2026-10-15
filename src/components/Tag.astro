@@ -16,7 +16,7 @@ const locale = propLocale ?? getLocaleFromPathname(Astro.url.pathname);
 
 <li>
   <a
-    href={getLocalizedPath(locale, `/tags/${tag}/`)}
+    href={getLocalizedPath(locale, `/tags/${encodeURIComponent(tag)}/`)}
     transition:name={tag}
     class:list={[
       "flex items-center gap-0.5",

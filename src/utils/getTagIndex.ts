@@ -1,91 +1,77 @@
 import type { CollectionEntry } from "astro:content";
 import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
 import { getLocalizedPath } from "@/i18n/routes";
-import { buildTagRelations, resolveTagTranslation } from "./localizedTags.mjs";
+import { getTagAliases, getTagReferenceDiagnostics } from "./localizedTags.mjs";
+import { getTagDefinitions, resolveTagDefinition } from "./tagContent";
 import getSortedPosts from "./getSortedPosts";
-import { getPostSource, validatePostLocalizations } from "./postI18n";
+import getUniqueTags from "./getUniqueTags";
+import { validatePostLocalizations } from "./postI18n";
 
-export type TagRoute = { locale: Locale; tag: string; tagName: string };
+export type TagRoute = {
+  locale: Locale;
+  tag: string;
+  tagName: string;
+  count: number;
+  description?: string;
+  entry?: CollectionEntry<"tags">;
+};
 
-/**
- * Adapt public blog entries to the shared tag relationship and route contract.
- * @param posts Blog entries, including drafts and scheduled posts.
- * @returns Public sorted posts, localized tag routes, and relationship diagnostics.
- * @throws {Error} When content identities or public tag routes conflict.
- */
-export function getTagIndex(posts: CollectionEntry<"blog">[]) {
+/** Build routes from public articles, with metadata selected by fixed ID and language. */
+export function getTagIndex(
+  posts: CollectionEntry<"blog">[],
+  entries: CollectionEntry<"tags">[]
+) {
   validatePostLocalizations(posts);
+  const definitions = getTagDefinitions(entries);
+  const knownIds = new Set(definitions.map(item => item.id));
+  const diagnostics = getTagReferenceDiagnostics(
+    posts.map(post => ({
+      path: post.filePath ?? post.id,
+      tags: post.data.tags,
+    })),
+    knownIds
+  );
   const publicPosts = getSortedPosts(posts);
-  const relations = buildTagRelations(
-    publicPosts.map(post => {
-      const { baseId, locale } = getPostSource(post);
+  const tags: TagRoute[] = SUPPORTED_LOCALES.flatMap(locale =>
+    getUniqueTags(publicPosts, locale).map(({ tag, count }) => {
+      const definition = resolveTagDefinition(definitions, tag, locale);
       return {
-        baseId,
         locale,
-        tags: post.data.tags,
-        translation: post.data.translation,
+        tag,
+        count,
+        tagName: definition?.name ?? tag,
+        description: definition?.description,
+        entry: definition?.entry,
       };
     })
   );
-  const tags: TagRoute[] = SUPPORTED_LOCALES.flatMap(locale =>
-    relations.tags
-      .filter(tag => tag.locale === locale)
-      .map(tag => ({ locale, tag: tag.slug, tagName: tag.tag }))
-      .sort((a, b) => a.tag.localeCompare(b.tag))
-  );
-  return { posts: publicPosts, tags, relations };
+  const reservedIds = new Set([
+    ...knownIds,
+    ...posts.flatMap(post => post.data.tags),
+  ]);
+  const legacy = getTagAliases(definitions, tags, reservedIds);
+  return {
+    posts: publicPosts,
+    tags,
+    aliases: legacy.aliases,
+    diagnostics: [...diagnostics, ...legacy.diagnostics],
+  };
 }
 
-/**
- * Link each language to a unique public tag route or its tag collection.
- * @param index Public tag index used to generate the detail routes.
- * @param tag Current tag route from the same index.
- * @returns Language links and fallback diagnostics for build-time logging.
- */
+/** Link to the same ID only when that language has a public route. */
 export function getTagLanguageLinks(
   index: ReturnType<typeof getTagIndex>,
   tag: TagRoute
 ) {
   const links: Partial<Record<Locale, string>> = {};
-  const diagnostics: string[] = [];
   for (const locale of SUPPORTED_LOCALES) {
-    if (locale === tag.locale) {
-      links[locale] = getLocalizedPath(
-        locale,
-        `/tags/${encodeURIComponent(tag.tag)}/`
-      );
-      continue;
-    }
-    const translated = resolveTagTranslation(
-      index.relations,
-      tag.locale,
-      tag.tagName,
-      locale
+    const exists = index.tags.some(
+      item => item.locale === locale && item.tag === tag.tag
     );
-    const target =
-      translated.status === "resolved"
-        ? index.tags.find(
-            item =>
-              item.locale === locale && item.tagName === translated.value.tag
-          )
-        : undefined;
-    if (target) {
-      links[locale] = getLocalizedPath(
-        locale,
-        `/tags/${encodeURIComponent(target.tag)}/`
-      );
-    } else {
-      links[locale] = getLocalizedPath(locale, "/tags/");
-      const reason =
-        translated.status === "missing"
-          ? translated.reason
-          : translated.status === "resolved"
-            ? "unreachable-target"
-            : "ambiguous-mapping";
-      diagnostics.push(
-        `Tag language fallback: ${tag.locale}/${tag.tag} -> ${locale}/tags (${reason})`
-      );
-    }
+    links[locale] = getLocalizedPath(
+      locale,
+      exists ? `/tags/${encodeURIComponent(tag.tag)}/` : "/tags/"
+    );
   }
-  return { links, diagnostics };
+  return links;
 }

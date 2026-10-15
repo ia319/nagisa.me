@@ -976,15 +976,10 @@ test("retains written drafts when post-write reads fail", async t => {
         /post.en.md:.*Review read denied/.test(message)
     )
   );
-  assert.ok(
-    messages.some(message =>
-      message.startsWith("[validation:tag-check-skipped]")
-    )
-  );
   assert.match(messages.at(-1), /Generated 2 draft/);
 });
 
-test("reports new tag-route collisions only after draft writes", async t => {
+test("reports missing tag definitions after saving drafts", async t => {
   const { run, root, entries, messages } = fixture(t, {
     "src/data/blog/another.en.md": source.replace(
       "tags: [Outils]",
@@ -994,7 +989,7 @@ test("reports new tag-route collisions only after draft writes", async t => {
   await run();
   assert.ok(entries.has(path.join(root, "src/data/blog/post.en.md")));
   const warning = messages.findIndex(message =>
-    message.startsWith("[validation:tag-route]")
+    message.startsWith("[source:missing-tag-definition]")
   );
   assert.ok(warning >= 0);
   assert.ok(
@@ -1003,7 +998,7 @@ test("reports new tag-route collisions only after draft writes", async t => {
         message => message === "Written: src/data/blog/post.ar.md"
       )
   );
-  assert.match(messages[warning], /Tag route collision/);
+  assert.match(messages[warning], /Missing tag definition.*Outils/);
   assert.match(messages.at(-1), /Generated 2 draft/);
 });
 
@@ -1211,7 +1206,7 @@ test("staged command uses working-tree runtime settings with index language and 
     output.document.getIn(["translation", "model"]),
     "working-tree:12b"
   );
-  assert.deepEqual(output.fields.tags, ["Tools"]);
+  assert.deepEqual(output.fields.tags, ["Outils"]);
   assert.ok(
     calls
       .filter(call => call.args[0] === "run")

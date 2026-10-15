@@ -1,7 +1,4 @@
-import {
-  buildTagRelations,
-  resolveTagTranslation,
-} from "../../src/utils/localizedTags.mjs";
+import { getTagReferenceDiagnostics } from "../../src/utils/localizedTags.mjs";
 import { validateLocaleRegistry } from "../locale-config/registry.mjs";
 import { parseDocument, stringify } from "yaml";
 import { parseArticle, renderArticle } from "./frontmatter.mjs";
@@ -13,7 +10,7 @@ import { planTranslationTargets } from "./targets.mjs";
 
 /**
  * Prepare model requests and same-directory output plans using only snapshots.
- * @param {{source: {path: string, text: string}, registry: unknown, targetLocales: readonly string[], files: readonly import("./targets.mjs").FileState[], references?: readonly import("../../src/utils/localizedTags.mjs").LocalizedTagContent[], model: string, fromLocale?: string, force?: boolean, userPrompt?: string, promptMode?: "append" | "replace"}} input Source, reference, and configuration snapshots plus explicit options.
+ * @param {{source: {path: string, text: string}, registry: unknown, targetLocales: readonly string[], files: readonly import("./targets.mjs").FileState[], tagIds?: readonly string[], model: string, fromLocale?: string, force?: boolean, userPrompt?: string, promptMode?: "append" | "replace"}} input Source, tag identity, and configuration snapshots plus explicit options.
  * @returns Model requests and source data needed for final assembly.
  * @throws {Error} When preflight, frontmatter, tag routes, or prompt options are invalid.
  */
@@ -46,23 +43,18 @@ export function prepareTranslation(input) {
   });
   const article = parseArticle(input.source.text);
   const markdown = prepareMarkdown(article.body);
-  const references = [...(input.references ?? [])].filter(
-    item => item.baseId !== source.baseId || item.locale !== source.locale
-  );
-  const declaredSource = article.document.getIn([
-    "translation",
-    "sourceLocale",
-  ]);
-  references.push({
-    baseId: source.baseId,
-    locale: source.locale,
-    tags: article.fields.tags,
-    ...(typeof declaredSource === "string"
-      ? { translation: { sourceLocale: declaredSource } }
-      : {}),
-  });
-  const relations = buildTagRelations(references);
-  const diagnostics = [...relations.diagnostics, ...markdown.diagnostics];
+  const diagnostics = [
+    ...getTagReferenceDiagnostics(
+      [
+        {
+          path: `src/data/blog/${input.source.path}`,
+          tags: article.fields.tags,
+        },
+      ],
+      new Set(input.tagIds ?? [])
+    ),
+    ...markdown.diagnostics,
+  ];
   const requests = [];
   // Validate options even when all source text is empty or protected.
   buildTranslationPrompt({
@@ -77,10 +69,8 @@ export function prepareTranslation(input) {
     const fields = {
       title: article.fields.title,
       description: article.fields.description,
-      tags: [...article.fields.tags],
     };
     const metadata = {};
-    const tagIndices = [];
     function request(field, text) {
       const id = `${target.locale}:${field}`;
       const prompt = buildTranslationPrompt({
@@ -106,25 +96,13 @@ export function prepareTranslation(input) {
     for (const field of ["title", "description"]) {
       if (fields[field].trim()) metadata[field] = fields[field];
     }
-    for (const [index, tag] of fields.tags.entries()) {
-      const reused = resolveTagTranslation(
-        relations,
-        source.locale,
-        tag,
-        target.locale
-      );
-      if (reused.status === "resolved") fields.tags[index] = reused.value.tag;
-      else tagIndices.push(index);
-    }
-    if (tagIndices.length)
-      metadata.tags = tagIndices.map(index => article.fields.tags[index]);
     const metadataId = Object.keys(metadata).length
       ? request("metadata", stringify(metadata, { lineWidth: 0 }))
       : undefined;
     const bodyId = markdown.needsTranslation
       ? request("body", markdown.text)
       : undefined;
-    return { ...target, fields, metadata, tagIndices, metadataId, bodyId };
+    return { ...target, fields, metadata, metadataId, bodyId };
   });
   return {
     article,
@@ -132,7 +110,6 @@ export function prepareTranslation(input) {
     source,
     sourcePath: input.source.path,
     model: input.model,
-    references,
     requests,
     outputs,
     diagnostics,
@@ -140,7 +117,7 @@ export function prepareTranslation(input) {
 }
 
 function readMetadata(output, text) {
-  const fields = { ...output.fields, tags: [...output.fields.tags] };
+  const fields = { ...output.fields };
   const diagnostics = [];
   if (!output.metadataId) return { fields, diagnostics };
   let value;
@@ -169,30 +146,7 @@ function readMetadata(output, text) {
   }
   for (const field of Object.keys(output.metadata)) {
     const translated = value[field];
-    if (field === "tags") {
-      if (
-        !Array.isArray(translated) ||
-        translated.length !== output.tagIndices.length
-      ) {
-        diagnostics.push({
-          code: "metadata-tags",
-          field,
-          message: `Expected ${output.tagIndices.length} translated tags in their original order; received ${JSON.stringify(translated)}. Requested tags remain untranslated; original values were kept to avoid shifting tag positions.`,
-        });
-        continue;
-      }
-      for (const [index, tag] of translated.entries()) {
-        const sourceIndex = output.tagIndices[index];
-        if (typeof tag === "string" && tag.trim())
-          fields.tags[sourceIndex] = tag.trim();
-        else
-          diagnostics.push({
-            code: "metadata-field",
-            field,
-            message: `tags[${sourceIndex}] remains untranslated: expected a non-empty string, received ${JSON.stringify(tag)}; original value was kept`,
-          });
-      }
-    } else if (typeof translated === "string" && translated.trim()) {
+    if (typeof translated === "string" && translated.trim()) {
       fields[field] = translated.trim();
     } else
       diagnostics.push({
@@ -260,7 +214,6 @@ export function validateTranslation(plan, responses, files) {
       response.text.trim().replace(/\r\n?/g, "\n"),
     ])
   );
-  const completed = [];
   for (const output of plan.outputs) {
     const file = files.find(file => file.path === output.path);
     if (!file) continue;
@@ -285,21 +238,12 @@ export function validateTranslation(plan, responses, files) {
     }
     const fields = [];
     for (const field of Object.keys(output.metadata)) {
-      if (field === "tags") {
-        for (const index of output.tagIndices)
-          fields.push({
-            name: `tags[${index}]`,
-            key: "tags",
-            source: plan.article.fields.tags[index],
-            value: article.fields.tags[index],
-          });
-      } else
-        fields.push({
-          name: field,
-          key: field,
-          source: plan.article.fields[field],
-          value: article.fields[field],
-        });
+      fields.push({
+        name: field,
+        key: field,
+        source: plan.article.fields[field],
+        value: article.fields[field],
+      });
     }
     for (const field of fields) {
       const point = article.fieldPositions[field.key];
@@ -372,41 +316,16 @@ export function validateTranslation(plan, responses, files) {
           `\n  Original: ${diagnostic.original}\n  Saved: ${diagnostic.saved}`,
       });
     }
-    completed.push({ ...output, fields: article.fields });
-  }
-  if (completed.length !== plan.outputs.length) {
-    diagnostics.push({
-      code: "tag-check-skipped",
-      message: `Tag relationships were not checked: read and parsed ${completed.length}/${plan.outputs.length} saved drafts`,
-    });
-    return diagnostics;
-  }
-  const targetLocales = new Set(completed.map(output => output.locale));
-  const references = plan.references.filter(
-    item =>
-      item.baseId !== plan.source.baseId || !targetLocales.has(item.locale)
-  );
-  references.push(
-    ...completed.map(output => ({
-      baseId: plan.source.baseId,
-      locale: output.locale,
-      tags: output.fields.tags,
-      translation: { sourceLocale: plan.source.locale },
-    }))
-  );
-  try {
-    const relations = buildTagRelations(references);
-    for (const item of relations.diagnostics) {
-      if (
-        ![...plan.diagnostics, ...diagnostics].some(
-          previous =>
-            previous.code === item.code && previous.message === item.message
-        )
-      )
-        diagnostics.push(item);
+    if (
+      article.document.has("tags") !== plan.article.document.has("tags") ||
+      JSON.stringify(article.fields.tags) !==
+        JSON.stringify(plan.article.fields.tags)
+    ) {
+      diagnostics.push({
+        code: "tags-modified",
+        message: `src/data/blog/${output.path}: saved tags differ from the source IDs`,
+      });
     }
-  } catch (error) {
-    diagnostics.push({ code: "tag-route", message: error.message });
   }
   return diagnostics;
 }

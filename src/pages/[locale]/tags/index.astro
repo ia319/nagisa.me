@@ -21,7 +21,10 @@ type Props = {
  * @throws {Error} When content identities or public tag routes conflict.
  */
 export async function getStaticPaths() {
-  const index = getTagIndex(await getCollection("blog"));
+  const index = getTagIndex(
+    await getCollection("blog"),
+    await getCollection("tags")
+  );
   return SUPPORTED_LOCALES.map(locale => ({
     params: { locale },
     props: { locale, tags: index.tags.filter(tag => tag.locale === locale) },

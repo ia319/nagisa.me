@@ -87,28 +87,17 @@ export function parseArticle(source) {
 /**
  * Assemble translated fields and Markdown using the shared content contract.
  * @param {ReturnType<typeof parseArticle>} article Source article snapshot.
- * @param {{title: string, description: string, tags: string[]}} fields Translated fields awaiting post-write content review.
+ * @param {{title: string, description: string}} fields Translated fields awaiting post-write content review.
  * @param {string} body Restored Markdown body awaiting post-write content review.
  * @param {{sourceLocale: string, model: string}} provenance Actual translation source and model.
  * @returns {string} Markdown text with LF, no BOM, and a final newline.
- * @throws {Error} When the translated tag count differs from the source.
  */
 export function renderArticle(article, fields, body, provenance) {
-  if (fields.tags.length !== article.fields.tags.length)
-    throw new Error("Translated tag count must match the source");
   const document = article.document.clone();
   for (const [field, action] of Object.entries(TRANSLATION_FIELD_POLICY)) {
     if (action === TRANSLATION_FIELD_ACTION.OMIT) document.delete(field);
     if (action !== TRANSLATION_FIELD_ACTION.TRANSLATE) continue;
-    if (field === "tags") {
-      if (document.has("tags")) {
-        fields.tags.forEach((tag, index) =>
-          document.setIn(["tags", index], tag)
-        );
-      }
-    } else {
-      document.set(field, fields[field]);
-    }
+    document.set(field, fields[field]);
   }
   for (const [field, value] of Object.entries(
     TRANSLATION_FRONTMATTER_OVERRIDES

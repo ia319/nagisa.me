@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { createSiteModuleLoader, siteRoot as root } from "./site-modules.mjs";
@@ -10,229 +9,180 @@ const registry = {
     fr: { label: "Français", dir: "ltr" },
     en: { label: "English", dir: "ltr" },
     ar: { label: "العربية", dir: "rtl" },
-    "pt-BR": { label: "Português", dir: "ltr" },
   },
 };
-const { moduleUrl, setPosts } = await createSiteModuleLoader(registry);
-
+const { moduleUrl, setPosts, setTags } = await createSiteModuleLoader(registry);
 const { getTagIndex, getTagLanguageLinks } = await import(
   moduleUrl(path.join(root, "src/utils/getTagIndex.ts"))
-);
-const { default: getUniqueTags } = await import(
-  moduleUrl(path.join(root, "src/utils/getUniqueTags.ts"))
 );
 const { default: getPostsByTag } = await import(
   moduleUrl(path.join(root, "src/utils/getPostsByTag.ts"))
 );
-
-function post(id, tags, sourceLocale, extra = {}) {
+function post(id, tags, data = {}) {
   return {
     id,
-    filePath: path.join(root, "src/data/blog", `${id}.md`),
-    data: {
-      tags,
-      title: id,
-      pubDatetime: new Date("2020-01-01"),
-      draft: false,
-      ...(sourceLocale
-        ? {
-            translation: { sourceLocale, provider: "ollama", model: "example" },
-          }
-        : {}),
-      ...extra,
-    },
+    filePath: path.join(root, "src/data/blog", id + ".md"),
+    data: { tags, title: id, pubDatetime: new Date("2020-01-01"), ...data },
+  };
+}
+function definition(id, name, data = {}) {
+  return {
+    id: id.toLowerCase(),
+    filePath: path.join(root, "src/data/tags", id + ".md"),
+    data: { name, ...data },
   };
 }
 const posts = [
-  post("guide", ["Outils"]),
-  post("guide.en", ["Tools"], "fr"),
-  post("guide.ar", ["أدوات"], "en"),
+  post("guide", ["tools", "tools"]),
+  post("guide.en", ["tools"]),
+  post("other", ["tools", "astro"]),
+];
+const definitions = [
+  definition("tools", "Outils", { aliases: ["outils"] }),
+  definition("tools.en", "Tools", { aliases: ["old-tools"] }),
 ];
 
-test("public tag collections and detail data contain only the selected language", () => {
+test("uses literal IDs, localized names and unique public article counts", () => {
   const before = structuredClone(posts);
-  const index = getTagIndex(posts);
-  assert.deepEqual(getUniqueTags(posts, "fr"), [
-    { tag: "outils", tagName: "Outils" },
-  ]);
-  assert.deepEqual(getUniqueTags(posts, "en"), [
-    { tag: "tools", tagName: "Tools" },
-  ]);
+  const index = getTagIndex(posts, definitions);
+  const french = index.tags.find(
+    item => item.locale === "fr" && item.tag === "tools"
+  );
+  assert.equal(french.tagName, "Outils");
+  assert.equal(french.count, 2);
   assert.deepEqual(
-    getPostsByTag(index.posts, "tools", "en").map(post => post.id),
+    getPostsByTag(index.posts, "tools", "en").map(item => item.id),
     ["guide.en"]
   );
-  assert.deepEqual(getPostsByTag(index.posts, "tools", "fr"), []);
-  assert.deepEqual(getUniqueTags(posts, "pt-BR"), []);
+  assert.deepEqual(getPostsByTag(index.posts, "Tools", "en"), []);
+  assert.deepEqual(getTagLanguageLinks(index, french), {
+    fr: "/fr/tags/tools",
+    en: "/en/tags/tools",
+    ar: "/ar/tags",
+  });
   assert.deepEqual(posts, before);
-});
-
-test("switches to unique public translations and logs missing-language fallbacks", () => {
-  const index = getTagIndex(posts);
-  const current = index.tags.find(tag => tag.locale === "fr");
-  const { links, diagnostics } = getTagLanguageLinks(index, current);
-  assert.equal(links.fr, "/fr/tags/outils");
-  assert.equal(links.en, "/en/tags/tools");
+  definitions[0].data.name = "Nouveau";
   assert.equal(
-    links.ar,
-    "/ar/tags/" +
-      encodeURIComponent(index.tags.find(tag => tag.locale === "ar").tag)
+    getTagIndex(posts, definitions).tags.find(item => item.tag === "tools").tag,
+    "tools"
   );
-  assert.equal(links["pt-BR"], "/pt-BR/tags");
+  definitions[0].data.name = "Outils";
   assert.ok(
-    diagnostics.some(message => message.includes("missing-translation"))
+    index.diagnostics.some(item => /astro.*other.md/.test(item.message))
   );
 });
 
-test("excludes drafts and future posts from tag pages and cross-language references", () => {
-  const hidden = [
-    posts[0],
-    post("guide.en", ["Tools"], "fr", { draft: true }),
-    post("guide.ar", ["أدوات"], "fr", { pubDatetime: new Date("2999-01-01") }),
-  ];
-  const index = getTagIndex(hidden);
-  assert.equal(index.posts.length, 1);
-  assert.equal(index.tags.length, 1);
-  const { links } = getTagLanguageLinks(index, index.tags[0]);
-  assert.equal(links.en, "/en/tags");
-  assert.equal(links.ar, "/ar/tags");
-  assert.deepEqual(getPostsByTag(hidden, "tools", "en"), []);
-});
-
-test("keeps ambiguous mappings on collections but preserves the current tag link", () => {
-  const index = getTagIndex([
-    ...posts,
-    post("second", ["Outils"]),
-    post("second.en", ["Utilities"], "fr"),
-  ]);
-  const tag = index.tags.find(tag => tag.locale === "fr");
-  const { links, diagnostics } = getTagLanguageLinks(index, tag);
-  assert.equal(links.fr, "/fr/tags/outils");
-  assert.equal(links.en, "/en/tags");
-  assert.equal(links.ar, "/ar/tags");
-  assert.ok(diagnostics.some(message => message.includes("ambiguous-mapping")));
-});
-
-test("refuses an unreachable mapped target and rejects duplicate public URLs", () => {
-  const index = getTagIndex(posts);
-  const current = index.tags.find(tag => tag.locale === "fr");
-  index.tags = index.tags.filter(tag => tag.locale !== "en");
-  const { links, diagnostics } = getTagLanguageLinks(index, current);
-  assert.equal(links.en, "/en/tags");
+test("does not fall back to another language, draft metadata, or empty tag documents", () => {
+  const index = getTagIndex(
+    [
+      ...posts,
+      post("draft.ar", ["tools"], { draft: true }),
+      post("future.ar", ["tools"], { pubDatetime: new Date("2999-01-01") }),
+    ],
+    [
+      definitions[0],
+      definition("tools.en", "Hidden", { draft: true }),
+      definition("empty", "Empty"),
+    ]
+  );
+  const english = index.tags.find(item => item.locale === "en");
+  assert.equal(english.tagName, "tools");
+  assert.equal(english.entry, undefined);
   assert.ok(
-    diagnostics.some(message => message.includes("unreachable-target"))
+    !index.tags.some(item => item.tag === "empty" || item.locale === "ar")
   );
+});
+
+test("validates physical paths, single-segment IDs and localized identities before filtering", () => {
   assert.throws(
-    () => getTagIndex([post("a", ["Tools"]), post("b", ["tools"])]),
-    /Tag route collision/
-  );
-  assert.doesNotThrow(() =>
-    getTagIndex([post("a", ["Tools"]), post("b", ["Tools"])])
-  );
-  assert.throws(
-    () => getTagIndex([post("a", ["A"]), post("a.fr", ["B"])]),
+    () =>
+      getTagIndex(posts, [
+        definition("tools", "A"),
+        definition("tools.fr", "B"),
+      ]),
     /same base path and locale/
   );
+  assert.throws(
+    () => getTagIndex(posts, [definition("nested/tools", "A")]),
+    /Invalid tag ID/
+  );
+  assert.throws(
+    () => getTagIndex(posts, [{ ...definitions[0], filePath: undefined }]),
+    /source path/
+  );
+  assert.throws(() => getTagIndex([post("a", ["a/b"])], []), /Invalid tag ID/);
+  assert.throws(
+    () => getTagIndex([post("a", []), post("a.fr", [])], []),
+    /same base path and locale/
+  );
+  assert.doesNotThrow(() => getTagIndex([post("a", ["Tools", "tools"])], []));
 });
 
-const collectionPage = await import(
+const overview = await import(
   moduleUrl(path.join(root, "src/pages/[locale]/tags/index.astro"))
 );
-const detailPath = path.join(
-  root,
-  "src/pages/[locale]/tags/[tag]/[...page].astro"
+const detail = await import(
+  moduleUrl(path.join(root, "src/pages/[locale]/tags/[tag]/[...page].astro"))
 );
-const detailPage = await import(moduleUrl(detailPath));
-
-test("collection pages expose only their language's public tags", async () => {
-  setPosts([
-    ...posts,
-    post("hidden.pt-BR", ["Oculto"], undefined, { draft: true }),
-  ]);
-  const routes = await collectionPage.getStaticPaths();
-  assert.deepEqual(
-    routes.map(route => route.params.locale),
-    Object.keys(registry.locales)
-  );
-  assert.deepEqual(
-    routes.map(route => route.props.tags.map(tag => tag.tagName)),
-    [["Outils"], ["Tools"], ["أدوات"], []]
-  );
-});
-
-test("detail pages pass public articles and resolved links to pagination and Header", async t => {
-  const logs = [];
-  t.mock.method(process.stderr, "write", message => {
-    logs.push(String(message));
-    return true;
-  });
-  setPosts([
-    ...posts,
-    post("second", ["Outils"]),
-    post("hidden.en", ["Tools"], undefined, { draft: true }),
-  ]);
-  const calls = [];
-  const routes = await detailPage.getStaticPaths({
-    paginate(data, options) {
-      calls.push({ data, options });
-      return [{ params: options.params, props: options.props }];
-    },
-  });
-  assert.equal(routes.length, 3);
-  const french = calls.find(call => call.options.params.locale === "fr");
-  assert.deepEqual(
-    french.data.map(post => post.id),
-    ["guide", "second"]
-  );
-  const english = calls.find(call => call.options.params.locale === "en");
-  assert.deepEqual(
-    english.data.map(post => post.id),
-    ["guide.en"]
-  );
-  assert.equal(english.options.props.tagName, "Tools");
-  assert.equal(english.options.props.languageLinks.fr, "/fr/tags/outils");
-  assert.equal(french.options.props.languageLinks.en, "/en/tags/tools");
-  assert.equal(french.options.props.languageLinks["pt-BR"], "/pt-BR/tags");
-  assert.ok(french.options.pageSize > 0);
-  assert.ok(logs.some(message => message.includes("missing-translation")));
-  const template = readFileSync(detailPath, "utf8");
-  assert.match(
-    template,
-    /<Header locale=\{locale\} languageLinks=\{languageLinks\}/
-  );
-  assert.match(template, /<h1\b[^>]*>[\s\S]*?\$\{tagName\}[\s\S]*?<\/h1>/);
-});
-
-test("page generation logs ambiguous relationships and rejects route collisions", async t => {
-  const logs = [];
-  t.mock.method(process.stderr, "write", message => {
-    logs.push(String(message));
-    return true;
-  });
-  setPosts([
-    ...posts,
-    post("second", ["Outils"]),
-    post("second.en", ["Utilities"], "fr"),
-  ]);
-  const routes = await detailPage.getStaticPaths({
-    paginate(_data, options) {
-      return [options];
-    },
-  });
-  const french = routes.find(route => route.params.locale === "fr");
-  assert.equal(french.props.languageLinks.en, "/en/tags");
-  assert.ok(
-    logs.some(message => message.includes("Ambiguous tag relationship"))
-  );
-  assert.ok(logs.some(message => message.includes("ambiguous-mapping")));
-  setPosts([post("a", ["Tools"]), post("b", ["tools"])]);
-  await assert.rejects(collectionPage.getStaticPaths(), /Tag route collision/);
-  await assert.rejects(
-    detailPage.getStaticPaths({
-      paginate() {
-        assert.fail("must reject before pagination");
+const legacy = await import(
+  moduleUrl(path.join(root, "src/pages/tags/[tag]/[...page].astro"))
+);
+const paginate = (data, options) =>
+  Array.from({ length: Math.ceil(data.length / options.pageSize) }, (_, i) => ({
+    params: { ...options.params, page: i ? String(i + 1) : undefined },
+    props: {
+      ...options.props,
+      page: {
+        data: data.slice(i * options.pageSize, (i + 1) * options.pageSize),
+        currentPage: i + 1,
+        lastPage: Math.ceil(data.length / options.pageSize),
       },
-    }),
-    /Tag route collision/
+    },
+  }));
+
+test("generates language collections and canonical plus legacy routes with real pagination", async () => {
+  setPosts([
+    ...Array.from({ length: 15 }, (_, i) => post("post-" + i, ["tools"])),
+    posts[1],
+  ]);
+  setTags(definitions);
+  const collections = await overview.getStaticPaths();
+  assert.deepEqual(
+    collections.map(item => item.props.tags.map(tag => tag.tagName)),
+    [["Outils"], ["Tools"], []]
   );
+  const pages = await detail.getStaticPaths({ paginate });
+  const canonical = pages.filter(
+    item => item.params.locale === "fr" && item.params.tag === "tools"
+  );
+  const aliases = pages.filter(
+    item => item.params.locale === "fr" && item.params.tag === "outils"
+  );
+  assert.ok(canonical.length > 1);
+  assert.equal(aliases.length, canonical.length);
+  for (const [i, item] of aliases.entries()) {
+    assert.equal(item.props.redirectTag, "tools");
+    assert.equal(item.props.page.currentPage, i + 1);
+    assert.equal(item.props.languageLinks.en, "/en/tags/tools");
+  }
+  const unprefixed = await legacy.getStaticPaths({ paginate });
+  assert.equal(unprefixed.length, canonical.length * 2);
+  assert.ok(
+    unprefixed.every(item => item.props.redirectPath === "/fr/tags/tools")
+  );
+  assert.ok(unprefixed.some(item => item.props.page.currentPage === 2));
+});
+
+test("warns for unknown IDs while keeping their routes", async t => {
+  const logs = [];
+  t.mock.method(process.stderr, "write", message => {
+    logs.push(String(message));
+    return true;
+  });
+  setPosts([post("unknown", ["missing"])]);
+  setTags([]);
+  const routes = await detail.getStaticPaths({ paginate });
+  assert.equal(routes[0].params.tag, "missing");
+  assert.equal(routes[0].props.tagName, "missing");
+  assert.ok(logs.some(message => /missing.*unknown.md/.test(message)));
 });
