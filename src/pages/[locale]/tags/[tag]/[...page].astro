@@ -1,5 +1,5 @@
 ---
-import { getCollection, type CollectionEntry } from "astro:content";
+import { getCollection, render, type CollectionEntry } from "astro:content";
 import type { GetStaticPathsOptions, Page } from "astro";
 import Main from "@/layouts/Main.astro";
 import Layout from "@/layouts/Layout.astro";
@@ -18,6 +18,8 @@ type Props = {
   locale: Locale;
   page: Page<CollectionEntry<"blog">>;
   tagName: string;
+  description?: string;
+  entry?: CollectionEntry<"tags">;
   redirectTag?: string;
   languageLinks: Partial<Record<Locale, string>>;
 };
@@ -38,7 +40,7 @@ export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
   }
 
   return index.tags.flatMap(tagRoute => {
-    const { locale, tag, tagName } = tagRoute;
+    const { locale, tag, tagName, description, entry } = tagRoute;
     const tagPosts = getPostsByTag(index.posts, tag, locale);
     const languageLinks = getTagLanguageLinks(index, tagRoute);
     const routes = [
@@ -53,6 +55,8 @@ export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
         props: {
           locale,
           tagName,
+          description,
+          entry,
           languageLinks,
           redirectTag: "redirectTag" in route ? route.redirectTag : undefined,
         },
@@ -63,7 +67,15 @@ export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
 }
 
 const tag = Astro.params.tag ?? "";
-const { page, locale, tagName, languageLinks, redirectTag } = Astro.props;
+const {
+  page,
+  locale,
+  tagName,
+  description,
+  entry,
+  languageLinks,
+  redirectTag,
+} = Astro.props;
 if (redirectTag)
   return Astro.redirect(
     getLocalizedPath(
@@ -72,6 +84,31 @@ if (redirectTag)
     ),
     301
   );
+const canonicalPath = getLocalizedPath(
+  locale,
+  `/tags/${encodeURIComponent(tag)}/`
+);
+const breadcrumbs = [
+  { label: t(locale, "tags.title"), href: getLocalizedPath(locale, "/tags/") },
+  { label: tagName, ...(page.currentPage > 1 ? { href: canonicalPath } : {}) },
+  ...(page.currentPage > 1
+    ? [
+        {
+          label: t(locale, "breadcrumb.page").replace(
+            "{page}",
+            String(page.currentPage)
+          ),
+        },
+      ]
+    : []),
+];
+const hasBody = Boolean(entry?.body?.trim());
+const rendered =
+  page.currentPage === 1 && hasBody && entry ? await render(entry) : undefined;
+const Content = rendered?.Content;
+const summary =
+  description?.trim() ||
+  `${t(locale, "tag.descriptionPrefix")}${tagName}${t(locale, "tag.descriptionSuffix")}`;
 ---
 
 <Layout
@@ -81,19 +118,77 @@ if (redirectTag)
   <Header locale={locale} languageLinks={languageLinks} />
   <Main
     locale={locale}
-    pageTitle={[t(locale, "tag.titlePrefix"), `${tagName}`]}
+    pageTitle={tagName}
     titleTransition={tag}
-    pageDesc={`${t(locale, "tag.descriptionPrefix")}${tagName}${t(locale, "tag.descriptionSuffix")}`}
+    pageDesc={summary}
+    descriptionStyle="normal"
+    {breadcrumbs}
   >
-    <h1 slot="title" transition:name={tag}>
-      {`${t(locale, "tag.titlePrefix")}${tagName}`}
-    </h1>
-    <ul>
-      {page.data.map(data => <Card locale={locale} {...data} />)}
-    </ul>
+    {
+      page.currentPage === 1 ? (
+        Content && (
+          <>
+            <a
+              href="#related-articles"
+              class="mb-6 inline-block text-accent underline decoration-dashed underline-offset-4 hover:decoration-solid"
+            >
+              {t(locale, "tag.viewArticles")}
+            </a>
+            <div class="tag-content app-prose w-full max-w-app wrap-break-word">
+              <Content />
+            </div>
+          </>
+        )
+      ) : (
+        <a
+          href={canonicalPath + "#main-content"}
+          class="inline-block text-accent underline decoration-dashed underline-offset-4 hover:decoration-solid"
+        >
+          {t(locale, "tag.backToIntroduction")}
+        </a>
+      )
+    }
+    <hr class="my-8 border-border" />
+    <section
+      id="related-articles"
+      aria-labelledby="related-articles-title"
+      tabindex="-1"
+      class="scroll-mt-8"
+    >
+      <h2
+        id="related-articles-title"
+        class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xl font-semibold"
+      >
+        {t(locale, "tag.relatedArticles")}
+        <span class="text-sm font-normal text-foreground/70"
+          >{
+            t(
+              locale,
+              page.total === 1
+                ? "tag.articleCount.one"
+                : "tag.articleCount.other"
+            ).replace(
+              "{count}",
+              new Intl.NumberFormat(locale).format(page.total)
+            )
+          }</span
+        >
+      </h2>
+      <ul>
+        {page.data.map(data => <Card locale={locale} variant="h3" {...data} />)}
+      </ul>
+    </section>
   </Main>
 
   <Pagination page={page} locale={locale} />
 
   <Footer locale={locale} noMarginTop={page.lastPage > 1} />
 </Layout>
+
+<style>
+  .tag-content :global(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+</style>

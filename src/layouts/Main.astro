@@ -1,37 +1,38 @@
 ---
-import Breadcrumb from "@/components/Breadcrumb.astro";
+import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb.astro";
 import type { Locale } from "@/i18n/config";
 import { SITE } from "@/config";
 
-type StringTitle = { pageTitle: string };
-type ArrayTitle = { pageTitle: [string, string]; titleTransition: string };
-
-type Props = (StringTitle | ArrayTitle) & {
+type Props = {
+  pageTitle: string;
+  titleTransition?: string;
   locale?: Locale;
   pageDesc?: string;
+  descriptionStyle?: "normal" | "italic";
+  breadcrumbs?: BreadcrumbItem[];
 };
 
 const { props } = Astro;
 const locale = props.locale;
-
 const backUrl = SITE.showBackButton ? Astro.url.pathname : "/";
 ---
 
-<Breadcrumb {locale} />
+<Breadcrumb {locale} items={props.breadcrumbs} />
 <main data-backUrl={backUrl} id="main-content" class="app-layout pb-4">
-  {
-    "titleTransition" in props ? (
-      <h1 class="text-2xl font-semibold sm:text-3xl">
-        {props.pageTitle[0]}
-        <span transition:name={props.titleTransition}>
-          {props.pageTitle[1]}
-        </span>
-      </h1>
-    ) : (
-      <h1 class="text-2xl font-semibold sm:text-3xl">{props.pageTitle}</h1>
-    )
-  }
-  <p class="mt-2 mb-6 italic">{props.pageDesc}</p>
+  <h1 class="text-2xl font-semibold sm:text-3xl">
+    {
+      props.titleTransition ? (
+        <span transition:name={props.titleTransition}>{props.pageTitle}</span>
+      ) : (
+        props.pageTitle
+      )
+    }
+  </h1>
+  <p
+    class:list={["mt-2 mb-6", { italic: props.descriptionStyle !== "normal" }]}
+  >
+    {props.pageDesc}
+  </p>
   <slot />
 </main>
 

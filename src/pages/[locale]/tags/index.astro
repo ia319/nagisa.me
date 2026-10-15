@@ -2,11 +2,11 @@
 import { getCollection } from "astro:content";
 import Main from "@/layouts/Main.astro";
 import Layout from "@/layouts/Layout.astro";
-import Tag from "@/components/Tag.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import { getTagIndex, type TagRoute } from "@/utils/getTagIndex";
 import { SUPPORTED_LOCALES, type Locale } from "@/i18n/config";
+import { getLocalizedPath } from "@/i18n/routes";
 import { t } from "@/i18n/ui";
 import { SITE } from "@/config";
 
@@ -40,9 +40,43 @@ const { locale, tags } = Astro.props;
     locale={locale}
     pageTitle={t(locale, "tags.title")}
     pageDesc={t(locale, "tags.description")}
+    breadcrumbs={[{ label: t(locale, "tags.title") }]}
   >
-    <ul class="flex flex-wrap gap-6">
-      {tags.map(({ tag, tagName }) => <Tag {tag} {tagName} locale={locale} />)}
+    <ul class="divide-y divide-border">
+      {
+        tags.map(({ tag, tagName, count, description }) => (
+          <li class="py-6 first:pt-0">
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 class="text-lg font-medium">
+                <a
+                  href={getLocalizedPath(
+                    locale,
+                    `/tags/${encodeURIComponent(tag)}/`
+                  )}
+                  class="text-accent underline decoration-dashed underline-offset-4 hover:decoration-solid"
+                >
+                  {tagName}
+                </a>
+              </h2>
+              <span class="text-sm text-foreground/70">
+                {t(
+                  locale,
+                  count === 1
+                    ? "tag.articleCount.one"
+                    : "tag.articleCount.other"
+                ).replace(
+                  "{count}",
+                  new Intl.NumberFormat(locale).format(count)
+                )}
+              </span>
+            </div>
+            <p class="mt-2 text-foreground/80">
+              {description?.trim() ||
+                `${t(locale, "tag.descriptionPrefix")}${tagName}${t(locale, "tag.descriptionSuffix")}`}
+            </p>
+          </li>
+        ))
+      }
     </ul>
   </Main>
   <Footer locale={locale} />
