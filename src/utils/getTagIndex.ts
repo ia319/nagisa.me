@@ -45,6 +45,17 @@ export function getTagIndex(
       };
     })
   );
+  // Static output must remain distinct on case-insensitive file systems.
+  const routesByCase = new Map<string, string>();
+  for (const { locale, tag } of tags) {
+    const key = JSON.stringify([locale, tag.normalize("NFC").toLowerCase()]);
+    const other = routesByCase.get(key);
+    if (other !== undefined && other !== tag)
+      throw new Error(
+        `Tag routes ${JSON.stringify(other)} and ${JSON.stringify(tag)} collide in locale ${JSON.stringify(locale)} on case-insensitive file systems`
+      );
+    routesByCase.set(key, tag);
+  }
   const reservedIds = new Set([
     ...knownIds,
     ...posts.flatMap(post => post.data.tags),

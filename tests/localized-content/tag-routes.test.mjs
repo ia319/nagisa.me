@@ -115,7 +115,48 @@ test("validates physical paths, single-segment IDs and localized identities befo
     () => getTagIndex([post("a", []), post("a.fr", [])], []),
     /same base path and locale/
   );
-  assert.doesNotThrow(() => getTagIndex([post("a", ["Tools", "tools"])], []));
+  assert.throws(
+    () =>
+      getTagIndex(posts, [definition("Tools", "A"), definition("tools", "B")]),
+    /differ only by case/
+  );
+});
+
+test("rejects public tag routes that collide within one language", () => {
+  const cases = [
+    { articles: [post("a", ["Tools", "tools"])], docs: [] },
+    { articles: [post("a", ["Tools"]), post("b", ["tools"])], docs: [] },
+    {
+      articles: [post("a", ["Tools", "tools"])],
+      docs: [definition("tools", "Outils")],
+    },
+    { articles: [post("a", ["Café", "Cafe\u0301"])], docs: [] },
+  ];
+  for (const { articles, docs } of cases)
+    assert.throws(
+      () => getTagIndex(articles, docs),
+      /Tag routes .+ and .+ collide in locale "fr" on case-insensitive file systems/
+    );
+});
+
+test("preserves literal casing across languages and ignores unpublished routes", () => {
+  const index = getTagIndex(
+    [
+      post("a", ["Tools", "Tools"]),
+      post("b", ["Tools"]),
+      post("a.en", ["tools"]),
+      post("draft", ["tools"], { draft: true }),
+      post("future", ["tools"], { pubDatetime: new Date("2999-01-01") }),
+    ],
+    []
+  );
+  assert.deepEqual(
+    index.tags.map(({ locale, tag, count }) => ({ locale, tag, count })),
+    [
+      { locale: "fr", tag: "Tools", count: 2 },
+      { locale: "en", tag: "tools", count: 1 },
+    ]
+  );
 });
 
 const overview = await import(
@@ -171,6 +212,34 @@ test("generates language collections and canonical plus legacy routes with real 
     unprefixed.every(item => item.props.redirectPath === "/fr/tags/tools")
   );
   assert.ok(unprefixed.some(item => item.props.page.currentPage === 2));
+});
+
+test("excludes case-conflicting aliases from localized and legacy pages", async t => {
+  const logs = [];
+  t.mock.method(process.stderr, "write", message => {
+    logs.push(String(message));
+    return true;
+  });
+  setPosts([post("a", ["tools"]), post("b", ["other"])]);
+  setTags([
+    definition("tools", "Outils", { aliases: ["Tools", "Old", "legacy"] }),
+    definition("other", "Autres", { aliases: ["old"] }),
+  ]);
+  const routes = await detail.getStaticPaths({ paginate });
+  const unprefixed = await legacy.getStaticPaths({ paginate });
+  for (const pages of [routes, unprefixed])
+    assert.deepEqual(pages.map(item => item.params.tag).sort(), [
+      "legacy",
+      "other",
+      "tools",
+    ]);
+  assert.ok(logs.some(message => /Tools.*reserved ID/.test(message)));
+  assert.ok(logs.some(message => /Old.*old.*fr/.test(message)));
+  setPosts([post("a", ["Tools", "tools"])]);
+  await assert.rejects(
+    detail.getStaticPaths({ paginate }),
+    /Tag routes.*collide/
+  );
 });
 
 test("warns for unknown IDs while keeping their routes", async t => {
