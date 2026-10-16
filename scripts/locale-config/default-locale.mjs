@@ -137,7 +137,11 @@ export async function setDefaultLocale(root, targetLocale, fromLocale, report) {
   const renames = [];
   const unchanged = [];
 
-  for (const collection of ["src/data/blog", "src/data/pages"]) {
+  for (const collection of [
+    "src/data/blog",
+    "src/data/pages",
+    "src/data/tags",
+  ]) {
     try {
       await fs.lstat(path.join(root, collection));
     } catch (error) {

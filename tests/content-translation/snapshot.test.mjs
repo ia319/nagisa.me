@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   readTranslationSnapshot,
-  scanBlogFiles,
+  scanContentFiles,
 } from "../../scripts/content-translation/snapshot.mjs";
 import { memoryFiles } from "./memory-files.mjs";
 
@@ -46,10 +46,11 @@ function indexMock(t, root, contents, changed) {
   return calls;
 }
 
-test("reads explicit content and draft references from one working-tree snapshot", async t => {
+test("reads only explicit article text and tag identities from the working tree", async t => {
   const { root } = memoryFiles(t, {
     "locales.config.mjs": registry("fr"),
     "src/data/blog/nested/post.md": source,
+    "src/data/tags/Outils.md": "---\nname: Outils\n---\n",
     "src/data/blog/reference.ar.md": source.replace(
       "tags: [Outils]",
       "draft: true\ntags: [أدوات]"
@@ -67,12 +68,11 @@ test("reads explicit content and draft references from one working-tree snapshot
   assert.equal(result.source.path, "nested/post.md");
   assert.equal(result.source.text, source);
   assert.equal(result.registry.defaultLocale, "fr");
-  assert.equal(result.references.length, 2);
-  assert.ok(result.references.some(item => item.locale === "ar"));
+  assert.deepEqual(result.tagIds, ["Outils"]);
   assert.ok(result.files.some(item => item.path === "asset.png"));
 });
 
-test("reads staged source, unchanged references, and configuration by captured blob IDs", async t => {
+test("reads staged source and configuration blobs without reading unrelated articles", async t => {
   const { root, reads } = memoryFiles(t, {
     "locales.config.mjs": registry("en"),
     "src/data/blog/post.md": source.replace("Bonjour", "Unstaged"),
@@ -90,16 +90,15 @@ test("reads staged source, unchanged references, and configuration by captured b
       "src/data/blog/post.md": source,
       "src/data/blog/ref.md": source,
       "src/data/blog/ref.en.md": stagedReference,
+      "src/data/tags/Outils.md": "---\nname: Outils\n---\n",
     },
     ["src/data/blog/post.md"]
   );
   const result = await readTranslationSnapshot(root, { staged: true });
   assert.equal(result.source.text, source);
   assert.equal(result.registry.defaultLocale, "fr");
-  assert.equal(result.references.length, 3);
-  assert.deepEqual(result.references.find(item => item.locale === "en").tags, [
-    "Tools",
-  ]);
+  assert.deepEqual(result.tagIds, ["Outils"]);
+  assert.equal(calls.filter(args => args[0] === "cat-file").length, 2);
   assert.deepEqual(reads, []);
   assert.ok(
     calls.some(args => args[0] === "diff" && args.includes("--no-renames"))
@@ -123,7 +122,10 @@ test("lists zero or multiple staged candidates and ignores deleted sources", asy
     await assert.rejects(
       readTranslationSnapshot(root, { staged: true }),
       error => {
-        assert.match(error.message, /Expected exactly one staged blog source/);
+        assert.match(
+          error.message,
+          /Expected exactly one staged blog or tag source/
+        );
         if (changed.length === 2)
           assert.match(error.message, /a.md, src\/data\/blog\/b.md/);
         return true;
@@ -197,7 +199,7 @@ test("rejects unsafe sources and preserves non-regular targets in the collision 
   ]) {
     await assert.rejects(readTranslationSnapshot(root, { file }));
   }
-  const files = await scanBlogFiles(root);
+  const files = await scanContentFiles(root, "blog");
   assert.ok(
     files.some(file => file.path === "a.en.md" && file.kind === "directory")
   );
@@ -208,10 +210,13 @@ test("rejects unsafe sources and preserves non-regular targets in the collision 
     kind: "directory",
     target: "outside",
   });
-  await assert.rejects(scanBlogFiles(root), /without symbolic links/);
+  await assert.rejects(
+    scanContentFiles(root, "blog"),
+    /without symbolic links/
+  );
 });
 
-test("rejects duplicate localized identities and invalid frontmatter before model work", async t => {
+test("rejects duplicate identities but does not parse unrelated article bodies", async t => {
   const { root, entries } = memoryFiles(t, {
     "locales.config.mjs": registry("fr"),
     "src/data/blog/a.md": source,
@@ -229,8 +234,72 @@ test("rejects duplicate localized identities and invalid frontmatter before mode
     kind: "file",
     text: registry("en"),
   });
+  assert.equal(
+    (await readTranslationSnapshot(root, { file: "src/data/blog/a.md" })).source
+      .text,
+    source
+  );
+});
+
+test("reads a tag-only project and keeps blog and tag identities independent", async t => {
+  const { root } = memoryFiles(t, {
+    "locales.config.mjs": registry("fr"),
+    "src/data/tags/tools.md": "---\nname: Outils\n---\n",
+    "src/data/tags/tools.en.md": "---\nname: Tools\naliases: [legacy]\n---\n",
+    "src/data/blog/tools.md": source,
+  });
+  const result = await readTranslationSnapshot(root, {
+    file: "src/data/tags/tools.md",
+  });
+  assert.equal(result.kind, "tags");
+  assert.equal(result.source.path, "tools.md");
+  assert.ok(result.targetTexts.get("tools.en.md").includes("legacy"));
+  assert.ok(result.files.every(file => file.path.startsWith("tools")));
+});
+
+test("captures tag source and target blobs while the working tree differs", async t => {
+  const { root, reads } = memoryFiles(t, {
+    "locales.config.mjs": registry("en"),
+    "src/data/tags/tools.md": "Unstaged source",
+    "src/data/tags/tools.en.md": "Unstaged target",
+  });
+  const original = "---\nname: Outils\n---\n";
+  const target = "---\nname: Tools\naliases: [indexed]\n---\n";
+  indexMock(
+    t,
+    root,
+    {
+      "locales.config.mjs": registry("fr"),
+      "src/data/tags/tools.md": original,
+      "src/data/tags/tools.en.md": target,
+    },
+    ["src/data/tags/tools.md"]
+  );
+  const result = await readTranslationSnapshot(root, { staged: true });
+  assert.equal(result.kind, "tags");
+  assert.equal(result.source.text, original);
+  assert.equal(result.targetTexts.get("tools.en.md"), target);
+  assert.equal(result.registry.defaultLocale, "fr");
+  assert.deepEqual(reads, []);
+});
+
+test("requires one staged source across both collections", async t => {
+  const { root } = memoryFiles(t, {
+    "src/data/blog/tools.md": source,
+    "src/data/tags/tools.md": "---\nname: Tools\n---\n",
+  });
+  indexMock(
+    t,
+    root,
+    {
+      "locales.config.mjs": registry("fr"),
+      "src/data/blog/tools.md": source,
+      "src/data/tags/tools.md": "---\nname: Tools\n---\n",
+    },
+    ["src/data/blog/tools.md", "src/data/tags/tools.md"]
+  );
   await assert.rejects(
-    readTranslationSnapshot(root, { file: "src/data/blog/a.md" }),
-    /frontmatter/
+    readTranslationSnapshot(root, { staged: true }),
+    /found 2.*src\/data\/blog\/tools.md.*src\/data\/tags\/tools.md/
   );
 });

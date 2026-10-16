@@ -1,186 +1,142 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildTagRelations,
-  resolveTagTranslation,
+  getTagAliases,
+  getTagReferenceDiagnostics,
+  isTagSegment,
 } from "../../src/utils/localizedTags.mjs";
-import { slugifyAll, slugifyStr } from "../../src/utils/slugify.mjs";
+import { slugifyStr } from "../../src/utils/slugify.mjs";
 
-const original = {
-  baseId: "guide",
-  locale: "fr",
-  tags: ["Intelligence artificielle", "Astro"],
-};
-const english = {
-  baseId: "guide",
-  locale: "en",
-  tags: ["Artificial intelligence", "Astro"],
-  translation: { sourceLocale: "fr" },
-};
-const japanese = {
-  baseId: "guide",
-  locale: "ja",
-  tags: ["人工知能", "Astro"],
-  translation: { sourceLocale: "en" },
-};
-
-test("shares the existing slug algorithm with site and Node consumers", () => {
-  assert.deepEqual(slugifyAll(["E2E Testing", "TypeScript 5.0", "人工智能"]), [
-    "e2e-testing",
-    "typescript-5.0",
-    "人工智能",
-  ]);
-  assert.equal(slugifyStr("Développement Web"), "developpement-web");
-});
-
-test("pairs ordered tags and follows translations through a third language", () => {
-  const input = [original, english, japanese];
-  const before = structuredClone(input);
-  const relations = buildTagRelations(input);
-  assert.deepEqual(relations.diagnostics, []);
-  assert.deepEqual(
-    resolveTagTranslation(relations, "fr", original.tags[0], "ja"),
-    {
-      status: "resolved",
-      value: { locale: "ja", tag: "人工知能", slug: "人工知能" },
-    }
-  );
-  assert.equal(
-    resolveTagTranslation(relations, "ja", "人工知能", "fr").value.tag,
-    original.tags[0]
-  );
-  assert.equal(
-    resolveTagTranslation(relations, "fr", "Astro", "en").value.tag,
-    "Astro"
-  );
-  assert.deepEqual(buildTagRelations([...input].reverse()), relations);
-  assert.deepEqual(input, before);
-});
-
-test("aggregates repeated tags across posts without route conflicts", () => {
-  const relations = buildTagRelations([
-    original,
-    { ...original, baseId: "another" },
-  ]);
-  assert.equal(relations.tags.length, 2);
-  assert.deepEqual(relations.diagnostics, []);
-});
-
-test("returns missing relationships without assuming identical labels are translations", () => {
-  const relations = buildTagRelations([
-    original,
-    { ...english, translation: undefined },
-  ]);
-  assert.deepEqual(resolveTagTranslation(relations, "fr", "Astro", "en"), {
-    status: "missing",
-    reason: "missing-translation",
-  });
-  assert.deepEqual(resolveTagTranslation(relations, "fr", "Missing", "en"), {
-    status: "missing",
-    reason: "unknown-source-tag",
-  });
-});
-
-test("diagnoses missing sources, self references, and mismatched tag counts", () => {
-  const missing = buildTagRelations([english]);
-  assert.equal(missing.diagnostics[0].code, "missing-source");
-  const self = buildTagRelations([
-    { ...english, translation: { sourceLocale: "en" } },
-  ]);
-  assert.equal(self.diagnostics[0].code, "source-is-target");
-  const mismatched = buildTagRelations([
-    original,
-    { ...english, tags: ["AI"] },
-  ]);
-  assert.equal(mismatched.diagnostics[0].code, "tag-count-mismatch");
-  assert.equal(
-    resolveTagTranslation(mismatched, "fr", original.tags[0], "en").status,
-    "missing"
-  );
-});
-
-test("does not infer positional relationships through duplicate tag arrays", () => {
-  const relations = buildTagRelations([
-    { ...original, tags: ["Astro", "Astro"] },
-    english,
-  ]);
-  assert.equal(relations.diagnostics[0].code, "duplicate-tags");
-  assert.equal(
-    resolveTagTranslation(relations, "en", "Astro", "fr").status,
-    "missing"
-  );
-});
-
-test("blocks an ambiguous component in both directions including transitive lookups", () => {
-  const relations = buildTagRelations([
-    original,
-    english,
-    japanese,
-    { ...original, baseId: "another" },
-    { ...english, baseId: "another", tags: ["AI", "Astro"] },
-  ]);
-  assert.ok(
-    relations.diagnostics.some(item => item.code === "ambiguous-mapping")
-  );
-  assert.equal(
-    resolveTagTranslation(relations, "fr", original.tags[0], "ja").status,
-    "ambiguous"
-  );
-  assert.equal(
-    resolveTagTranslation(relations, "ja", "人工知能", "fr").status,
-    "ambiguous"
-  );
-  assert.equal(
-    resolveTagTranslation(relations, "fr", "Astro", "en").status,
-    "resolved"
-  );
-});
-
-test("rejects same-language slug collisions instead of hiding duplicate routes", () => {
-  assert.throws(
-    () =>
-      buildTagRelations([
-        { ...original, tags: ["E2E Testing", "e2e-testing"] },
-      ]),
-    /Tag route collision/
-  );
-  assert.throws(
-    () => buildTagRelations([{ ...original, tags: ["C#", "C"] }]),
-    /Tag route collision/
-  );
-  assert.doesNotThrow(() =>
-    buildTagRelations([
-      { ...original, tags: ["C#"] },
-      { ...english, tags: ["C"] },
-    ])
-  );
-  for (const tag of ["", ".", "..", "   "]) {
+test("keeps valid literal IDs and diagnoses missing definitions by article path", () => {
+  for (const id of ["astro", "FrontEnd", "阅读体验"])
+    assert.equal(isTagSegment(id), true);
+  for (const id of [
+    "",
+    ".",
+    "..",
+    "two words",
+    "a/b",
+    "a\\b",
+    "a%20b",
+    "a?b",
+    "#a",
+    "a\n",
+  ]) {
+    assert.equal(isTagSegment(id), false);
     assert.throws(
-      () => buildTagRelations([{ ...original, tags: [tag] }]),
-      /Invalid tag route|Empty or invalid tag/
+      () =>
+        getTagReferenceDiagnostics(
+          [{ path: "post.md", tags: [id] }],
+          new Set()
+        ),
+      /Invalid tag ID.*post.md/
     );
   }
+  const warnings = getTagReferenceDiagnostics(
+    [{ path: "post.en.md", tags: ["astro", "missing", "missing"] }],
+    new Set(["astro"])
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /missing.*post.en.md/);
 });
 
-test("keeps public and draft reference snapshots separate through caller input", () => {
-  const publicRelations = buildTagRelations([original]);
-  const referenceRelations = buildTagRelations([original, english]);
-  assert.equal(
-    resolveTagTranslation(publicRelations, "fr", "Astro", "en").status,
-    "missing"
+test("reserves all IDs and skips every competing alias regardless of order", () => {
+  const definitions = [
+    {
+      id: "a",
+      locale: "fr",
+      aliases: ["a", "old", "b", "bad/alias", "unique"],
+    },
+    { id: "b", locale: "fr", aliases: ["old"] },
+    { id: "a", locale: "en", aliases: ["old"] },
+    { id: "draft", locale: "fr", draft: true, aliases: ["draft-old"] },
+    { id: "empty", locale: "fr", aliases: ["empty-old"] },
+  ];
+  const routes = [
+    { tag: "a", locale: "fr" },
+    { tag: "b", locale: "fr" },
+    { tag: "a", locale: "en" },
+  ];
+  const reserved = new Set(["a", "b", "draft", "empty"]);
+  const result = getTagAliases(definitions, routes, reserved);
+  assert.deepEqual(result.aliases, [
+    { locale: "en", alias: "old", tag: "a" },
+    { locale: "fr", alias: "unique", tag: "a" },
+  ]);
+  assert.deepEqual(
+    getTagAliases([...definitions].reverse(), routes, reserved).aliases,
+    result.aliases
   );
   assert.equal(
-    resolveTagTranslation(referenceRelations, "fr", "Astro", "en").status,
-    "resolved"
+    result.diagnostics.filter(item => item.code === "ambiguous-tag-alias")
+      .length,
+    1
+  );
+  assert.equal(
+    result.diagnostics.filter(item => item.code === "invalid-tag-alias").length,
+    2
   );
 });
 
-test("rejects duplicate content identities and handles empty snapshots", () => {
-  assert.throws(
-    () => buildTagRelations([original, original]),
-    /Duplicate localized tag content/
+test("reserves canonical IDs case-insensitively even without public routes", () => {
+  const result = getTagAliases(
+    [
+      {
+        id: "tools",
+        locale: "fr",
+        aliases: ["Tools", "DRAFT", "Empty", "ToolsArchive"],
+      },
+    ],
+    [{ tag: "tools", locale: "fr" }],
+    new Set(["tools", "draft", "empty"])
   );
-  const empty = buildTagRelations([]);
-  assert.deepEqual(empty.tags, []);
-  assert.deepEqual(empty.diagnostics, []);
+  assert.deepEqual(result.aliases, [
+    { locale: "fr", alias: "ToolsArchive", tag: "tools" },
+  ]);
+  assert.equal(result.diagnostics.length, 3);
+  assert.ok(
+    result.diagnostics.every(item => item.code === "invalid-tag-alias")
+  );
+});
+
+test("skips case-colliding aliases for the same or different owners regardless of order", () => {
+  const definitions = [
+    {
+      id: "a",
+      locale: "fr",
+      aliases: ["Old", "Solo", "solo", "Upper", "Upper"],
+    },
+    { id: "b", locale: "fr", aliases: ["old"] },
+    { id: "a", locale: "en", aliases: ["OLD"] },
+  ];
+  const routes = [
+    { tag: "a", locale: "fr" },
+    { tag: "b", locale: "fr" },
+    { tag: "a", locale: "en" },
+  ];
+  const reserved = new Set(["a", "b"]);
+  const result = getTagAliases(definitions, routes, reserved);
+  assert.deepEqual(result.aliases, [
+    { locale: "en", alias: "OLD", tag: "a" },
+    { locale: "fr", alias: "Upper", tag: "a" },
+  ]);
+  assert.equal(result.diagnostics.length, 2);
+  assert.ok(
+    result.diagnostics.every(item => item.code === "ambiguous-tag-alias")
+  );
+  assert.deepEqual(
+    getTagAliases(
+      [...definitions]
+        .reverse()
+        .map(item => ({ ...item, aliases: [...item.aliases].reverse() })),
+      routes,
+      reserved
+    ),
+    result
+  );
+});
+
+test("retains article slug behavior separately from literal tag IDs", () => {
+  assert.equal(slugifyStr("Hello World"), "hello-world");
+  assert.equal(slugifyStr("Astro"), "astro");
 });

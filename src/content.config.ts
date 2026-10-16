@@ -6,6 +6,7 @@ import { TRANSLATION_PROVIDER } from "@/content/translationContract.mjs";
 
 export const BLOG_PATH = "src/data/blog";
 export const PAGES_PATH = "src/data/pages";
+export const TAGS_PATH = "src/data/tags";
 
 const translationSchema = z
   .object({
@@ -53,4 +54,15 @@ const pages = defineCollection({
   }),
 });
 
-export const collections = { blog, pages };
+const tags = defineCollection({
+  loader: glob({ pattern: "**/[^_]*.md", base: `./${TAGS_PATH}` }),
+  schema: z.object({
+    name: z.string().trim().min(1),
+    description: z.string().optional(),
+    draft: z.boolean().optional(),
+    aliases: z.array(z.string()).optional(),
+    translation: translationSchema.optional(),
+  }),
+});
+
+export const collections = { blog, pages, tags };

@@ -18,11 +18,13 @@ export async function createSiteModuleLoader(registry, sources = new Map()) {
   const modules = new Map();
   const collectionUrl = `data:text/javascript;base64,${Buffer.from(
     `let posts = [];
+let tags = [];
 export function setPosts(value) { posts = value; }
-export async function getCollection() { return posts; }`,
+export function setTags(value) { tags = value; }
+export async function getCollection(name) { return name === "tags" ? tags : posts; }`,
     "utf8"
   ).toString("base64")}`;
-  const { setPosts } = await import(collectionUrl);
+  const { setPosts, setTags } = await import(collectionUrl);
 
   function moduleUrl(file) {
     if (modules.has(file)) return modules.get(file);
@@ -34,7 +36,7 @@ export async function getCollection() { return posts; }`,
       const schema = readFileSync(file, "utf8");
       source = [
         ...schema.matchAll(
-          /^export const (?:BLOG_PATH|PAGES_PATH) = "[^"]+";/gm
+          /^export const (?:BLOG_PATH|PAGES_PATH|TAGS_PATH) = "[^"]+";/gm
         ),
       ]
         .map(match => match[0])
@@ -75,7 +77,8 @@ export async function getCollection() { return posts; }`,
       file,
       code,
       ts.ScriptTarget.ES2022,
-      true
+      true,
+      ts.ScriptKind.JS
     );
     const replacements = [];
     for (const statement of parsed.statements) {
@@ -191,5 +194,5 @@ export async function getCollection() { return posts; }`,
     modules.set(file, url);
     return url;
   }
-  return { moduleUrl, componentUrl, setPosts };
+  return { moduleUrl, componentUrl, setPosts, setTags };
 }

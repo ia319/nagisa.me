@@ -22,7 +22,7 @@ test("classifies every blog schema field with a deterministic action", () => {
     title: TRANSLATION_FIELD_ACTION.TRANSLATE,
     featured: TRANSLATION_FIELD_ACTION.COPY,
     draft: TRANSLATION_FIELD_ACTION.FORCE_DRAFT,
-    tags: TRANSLATION_FIELD_ACTION.TRANSLATE,
+    tags: TRANSLATION_FIELD_ACTION.COPY,
     ogImage: TRANSLATION_FIELD_ACTION.COPY,
     description: TRANSLATION_FIELD_ACTION.TRANSLATE,
     canonicalURL: TRANSLATION_FIELD_ACTION.OMIT,

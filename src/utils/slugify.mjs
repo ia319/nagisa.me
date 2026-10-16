@@ -12,10 +12,3 @@ export function slugifyStr(value) {
     ? kebabcase(value)
     : slugify(value, { lower: true });
 }
-
-/**
- * Generate slugs for a list of display labels.
- * @param {string[]} values Display labels in input order.
- * @returns {string[]} Slugs in the same order.
- */
-export const slugifyAll = values => values.map(slugifyStr);

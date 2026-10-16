@@ -3,6 +3,18 @@ import {
   validateLocalizedContentIdentities,
 } from "../../src/utils/localizedContentIdentity.mjs";
 
+export const CONTENT_DIRECTORIES = Object.freeze({
+  blog: "src/data/blog",
+  tags: "src/data/tags",
+});
+
+/** Reject caller-supplied roots before resolving any translation path. */
+export function getContentDirectory(kind) {
+  if (!Object.hasOwn(CONTENT_DIRECTORIES, kind))
+    throw new Error(`Unknown content kind: ${kind}`);
+  return CONTENT_DIRECTORIES[kind];
+}
+
 /** @typedef {Readonly<{path: string, kind: "file" | "directory" | "symlink"}>} FileState */
 
 function validateSnapshotPath(value) {
@@ -12,7 +24,7 @@ function validateSnapshotPath(value) {
     value.split("/").some(part => !part || part === "." || part === "..")
   ) {
     throw new Error(
-      `Expected a normalized blog-relative path: ${JSON.stringify(value)}`
+      `Expected a normalized content-relative path: ${JSON.stringify(value)}`
     );
   }
 }
@@ -38,7 +50,7 @@ export function planTranslationTargets({
     sourcePath.split("/").some(part => part.startsWith(".")) ||
     sourcePath.split("/").at(-1).startsWith("_")
   ) {
-    throw new Error("Source must be a blog Markdown content file");
+    throw new Error("Source must be a Markdown content file");
   }
   for (const file of files) validateSnapshotPath(file.path);
   if (

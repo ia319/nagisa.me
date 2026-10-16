@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { stringify } from "yaml";
+import { parseContent } from "./frontmatter.mjs";
 import { parseTranslationArgs, TRANSLATION_HELP } from "./options.mjs";
 import { readTranslationSettings } from "./settings.mjs";
 import { readTranslationSnapshot, readProjectFile } from "./snapshot.mjs";
@@ -51,7 +53,28 @@ export async function runTranslationCommand(
     model: settings.model,
     userPrompt,
   });
-  const writes = await prepareWrites(snapshot.root, plan.outputs);
+  const writes = await prepareWrites(snapshot.root, plan.outputs, plan.kind);
+  if (plan.kind === "tags") {
+    for (const target of writes.targets) {
+      if (target.before === undefined) continue;
+      const captured = snapshot.targetTexts.get(target.path);
+      if (options.staged) {
+        const currentAliases = parseContent(target.before, "tags").document.get(
+          "aliases",
+          true
+        );
+        const output = plan.outputs.find(item => item.path === target.path);
+        if (stringify(currentAliases) !== stringify(output.targetAliases))
+          throw new Error(
+            `Target aliases differ from the Git index: ${target.path}; use file mode or synchronize aliases before --staged --force`
+          );
+      } else if (target.before !== captured) {
+        throw new Error(
+          `Target changed after the input snapshot: ${target.path}`
+        );
+      }
+    }
+  }
   let service;
   let failed = false;
   try {
@@ -75,7 +98,7 @@ export async function runTranslationCommand(
     for (const diagnostic of plan.diagnostics) {
       const point = diagnostic.source;
       report(
-        `[source:${diagnostic.code}] src/data/blog/${snapshot.source.path}${point ? `:${plan.article.bodyLine + point.line - 1}:${point.column}` : ""}: ${diagnostic.message}`
+        `[source:${diagnostic.code}] ${plan.directory}/${snapshot.source.path}${point ? `:${plan.content.bodyLine + point.line - 1}:${point.column}` : ""}: ${diagnostic.message}`
       );
     }
     const savedFiles = [];
@@ -86,7 +109,7 @@ export async function runTranslationCommand(
           path: file.path,
           text: await readProjectFile(
             snapshot.root,
-            path.join("src/data/blog", file.path)
+            path.join(plan.directory, file.path)
           ),
         });
       } catch (error) {
@@ -110,7 +133,7 @@ export async function runTranslationCommand(
       `Content validation: ${diagnostics.length} issue group(s). Saved drafts were kept.`
     );
     report(
-      `Generated ${result.files.length} draft article(s). Review translations before publication.`
+      `Generated ${result.files.length} content draft(s). Review translations before publication.`
     );
     signal.throwIfAborted();
   } catch (error) {
