@@ -10,6 +10,7 @@ type Props = {
   pageDesc?: string;
   descriptionStyle?: "normal" | "italic";
   breadcrumbs?: BreadcrumbItem[];
+  searchableHeader?: "title" | "title-description";
 };
 
 const { props } = Astro;
@@ -19,7 +20,10 @@ const backUrl = SITE.showBackButton ? Astro.url.pathname : "/";
 
 <Breadcrumb {locale} items={props.breadcrumbs} />
 <main data-backUrl={backUrl} id="main-content" class="app-layout pb-4">
-  <h1 class="text-2xl font-semibold sm:text-3xl">
+  <h1
+    class="text-2xl font-semibold sm:text-3xl"
+    data-pagefind-body={props.searchableHeader ? true : undefined}
+  >
     {
       props.titleTransition ? (
         <span transition:name={props.titleTransition}>{props.pageTitle}</span>
@@ -30,6 +34,9 @@ const backUrl = SITE.showBackButton ? Astro.url.pathname : "/";
   </h1>
   <p
     class:list={["mt-2 mb-6", { italic: props.descriptionStyle !== "normal" }]}
+    data-pagefind-body={props.searchableHeader === "title-description"
+      ? true
+      : undefined}
   >
     {props.pageDesc}
   </p>

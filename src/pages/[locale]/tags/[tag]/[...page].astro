@@ -104,6 +104,13 @@ const breadcrumbs = [
     : []),
 ];
 const hasBody = Boolean(entry?.body?.trim());
+const hasIntroduction =
+  page.currentPage === 1 && Boolean(entry && (description?.trim() || hasBody));
+const searchableHeader = hasIntroduction
+  ? description?.trim()
+    ? "title-description"
+    : "title"
+  : undefined;
 const rendered =
   page.currentPage === 1 && hasBody && entry ? await render(entry) : undefined;
 const Content = rendered?.Content;
@@ -123,6 +130,7 @@ const summary =
     titleTransition={tag}
     pageDesc={summary}
     descriptionStyle="normal"
+    {searchableHeader}
     {breadcrumbs}
   >
     {
@@ -135,7 +143,10 @@ const summary =
             >
               {t(locale, "tag.viewArticles")}
             </a>
-            <div class="tag-content app-prose w-full max-w-app wrap-break-word">
+            <div
+              class="tag-content app-prose w-full max-w-app wrap-break-word"
+              data-pagefind-body
+            >
               <Content />
             </div>
           </>
@@ -150,7 +161,7 @@ const summary =
       )
     }
     {
-      page.currentPage === 1 && entry && (description?.trim() || hasBody) && (
+      hasIntroduction && entry && (
         <ContentGitMeta filePath={entry.filePath} locale={locale} />
       )
     }

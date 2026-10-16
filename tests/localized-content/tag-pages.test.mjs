@@ -195,7 +195,7 @@ test("renders missing, draft, name-only and description-only metadata with local
     assert.ok(!html.includes("Hidden") && !html.includes("English only"));
     assert.ok(!html.includes("查看文章"));
     assert.equal(rendered.length, count);
-    assert.match(html, /<p class="mt-2 mb-6">/);
+    assert.match(html, /<p class="mt-2 mb-6"[^>]*>/);
     assert.match(html, /<h3\b[^>]*>\s*Article sample\s*<\/h3>/);
   }
   const english = getTagIndex([post("sample.en")], [entry("frontend")]).tags[0];
@@ -472,4 +472,98 @@ test("uses the current language tag file history independently of related articl
       before.get(tag.locale)
     );
   }
+});
+
+test("indexes only custom introductions and excludes navigation, metadata and article cards", async t => {
+  const enabled = SITE.contentGitMeta.enabled;
+  t.after(() => {
+    SITE.contentGitMeta.enabled = enabled;
+  });
+  SITE.contentGitMeta.enabled = true;
+  const cases = [
+    { docs: [], blocks: [] },
+    { docs: [entry("frontend")], blocks: [] },
+    { docs: [entry("frontend", { description: "  " }, "\n")], blocks: [] },
+    {
+      docs: [entry("frontend", { draft: true, description: "Hidden" }, "Body")],
+      blocks: [],
+    },
+    {
+      docs: [entry("frontend.en", { description: "Other language" }, "Body")],
+      blocks: [],
+    },
+    {
+      docs: [entry("frontend", { description: "Custom summary" })],
+      blocks: ["h1", "p"],
+    },
+    {
+      docs: [entry("frontend", {}, "<p>Unique introduction</p>")],
+      blocks: ["h1", "div"],
+    },
+    {
+      docs: [
+        entry(
+          "frontend",
+          { description: "Custom summary" },
+          "<p>Unique introduction</p>"
+        ),
+      ],
+      blocks: ["h1", "p", "div"],
+    },
+  ];
+  for (const { docs, blocks } of cases) {
+    const tag = getTagIndex([post("sample")], docs).tags[0];
+    const html = await container.renderToString(TagDetail, detailOptions(tag));
+    const indexed = [
+      ...html.matchAll(
+        /<(h1|p|div)\b[^>]*data-pagefind-body(?:="[^"]*")?[^>]*>([\s\S]*?)<\/\1>/g
+      ),
+    ];
+    assert.deepEqual(
+      indexed.map(match => match[1]),
+      blocks
+    );
+    assert.equal(
+      (html.match(/data-pagefind-body/g) || []).length,
+      blocks.length
+    );
+    const content = indexed.map(match => match[2]).join(" ");
+    assert.equal(content.includes("Custom summary"), blocks.includes("p"));
+    assert.equal(
+      content.includes("Unique introduction"),
+      blocks.includes("div")
+    );
+    assert.equal(content.includes("Astro"), blocks.length > 0);
+    assert.ok(!content.includes("所有带有标签"));
+    for (const excluded of [
+      "首次提交于",
+      "相关文章",
+      "查看文章",
+      "Article sample",
+      "Article summary",
+      "2020",
+    ])
+      assert.ok(!content.includes(excluded), excluded);
+    const pageTwo = await container.renderToString(
+      TagDetail,
+      detailOptions(tag, 2)
+    );
+    assert.ok(!pageTwo.includes("data-pagefind-body"));
+  }
+  const overview = await container.renderToString(Overview, {
+    props: {
+      locale: "zh",
+      tags: getTagIndex(
+        [post("sample")],
+        [entry("frontend", { description: "Custom summary" })]
+      ).tags,
+    },
+    request: new Request("https://example.com/zh/tags"),
+  });
+  assert.ok(!overview.includes("data-pagefind-body"));
+  const main = await container.renderToString(Main, {
+    props: { locale: "en", pageTitle: "Posts", pageDesc: "All posts" },
+    request: new Request("https://example.com/en/posts"),
+  });
+  assert.ok(!main.includes("data-pagefind-body"));
 });
