@@ -44,7 +44,7 @@ Each language has pages under `/<locale>/`. The header language switcher links
 article translations; missing translations lead to the target language's post
 list.
 
-Blog and page content share these filename rules:
+Blog, page, and tag content share these filename rules:
 
 - Files without a language suffix belong to the default language.
   `.<locale>.md` suffixes identify any configured language, including the default.
@@ -110,8 +110,8 @@ pnpm locales:set-default <locale>
 ```
 
 The command updates the default language, adds original-language suffixes to
-unsuffixed blog and page files, and synchronizes deployment routes. File contents
-remain unchanged.
+unsuffixed blog, page, and tag files, and synchronizes deployment routes.
+File contents remain unchanged.
 
 Avoid concurrent content or configuration edits. Preflight failures leave files
 unchanged; write failures retain completed changes and report a retry command.
@@ -131,19 +131,25 @@ checks cover the entire page collection, including unused content.
 Frontmatter `title` and `description` supply page titles and descriptions;
 About also uses them for SEO and sharing. The homepage intro supports Markdown.
 
-#### Article Translation
+#### Content Translation
 
 `pnpm content:translate` uses a local Ollama model to create draft translations
-of one Markdown article under `src/data/blog/`.
+of one Markdown article under `src/data/blog/` or tag under `src/data/tags/`.
 
 Requirements:
 
 - Ollama on `PATH` and an installed local model.
 - Configured source and target languages.
 
-Translation covers `title`, `description`, `tags`, and the body. Drafts have
-`draft: true`, omit `canonicalURL`, and record translation attribution. Other
-frontmatter stays local and is preserved without being sent to the model.
+Translation covers these fields:
+
+- Articles: `title`, `description`, and the body.
+- Tags: `name`, an existing nonempty `description`, and body text.
+
+Article `tags` keep their original presence, values, order, duplicates, and YAML
+comments. The generator copies other frontmatter locally into the drafts, sets
+`draft: true`, records translation attribution, and removes article
+`canonicalURL`.
 
 ##### Translation Configuration
 
@@ -175,10 +181,12 @@ pnpm content:translate -- <file> --to <locale> [options]
 `--to` is repeatable for distinct target languages, each different from the
 source language.
 
-`--staged` replaces the file path and requires exactly one added, modified, or
-renamed article in the Git index. The source, tracked reference articles, and
-language configuration come from the index; output conflict checks still use
-the working tree.
+`--staged` replaces the file path. It requires exactly one added, modified, or
+renamed article or tag file in the Git index.
+
+In file mode, the source file, required tag metadata, and `locales.config.mjs`
+come from the working tree. With `--staged`, those inputs come from the Git
+index. Both modes check output paths against the working tree.
 
 **Ollama service**
 
@@ -199,7 +207,7 @@ pnpm content:translate -- --help
 ##### Drafts And Content Checks
 
 1. All model responses are collected.
-2. Drafts are saved in the source article's directory.
+2. Drafts are saved in the source file's directory.
 3. Saved files are checked for content issues.
 
 New files use `<name>.<locale>.md`, or `<name>.md` for the default language.
@@ -208,6 +216,11 @@ line endings.
 
 - Existing targets require `--force` for replacement. Different or unverifiable
   file ownership prevents replacement.
+- Add any required aliases to newly translated tag files. Replacing a tag
+  translation preserves the target language's aliases.
+- To replace a tag translation with `--staged --force`, the existing target file
+  must be present in the Git index, and its aliases must match the working-tree
+  file. Use file mode if either check fails.
 - The source stays unchanged. Translation does not stage files or create commits.
 - Code and link destinations are protected locally. Content checks report
   metadata and Markdown issues while retaining saved drafts.
@@ -221,18 +234,10 @@ Review drafts before publication and temporary files before removing them.
 Generated frontmatter records `sourceLocale`, `provider` (`ollama`), and `model`
 under `translation`.
 
-The source language and model appear below the body. A source link appears when
-the source article exists, is not a draft, and differs from the translation.
+On article pages, the source language and model appear below the body. A source
+link appears when the source article exists, is not a draft, and differs from
+the translation.
 Attribution is author-editable; model names are public.
-
-**Tag relationships**
-
-Matching tag positions in a translation and its declared source establish
-relationships. Counts and order must stay aligned. Unique existing translations
-are reused; other tags are sent to the model.
-
-Public tag pages link unique, reachable tag translations through the language
-switcher. Other results lead to the target language's tag list.
 
 **Verification**
 
@@ -242,12 +247,93 @@ pnpm test:content-translate
 
 Tests use in-memory data without writing articles or starting Ollama.
 
+### Tag Content
+
+Article `tags` contain fixed IDs shared across languages. The tag filename
+defines the ID; `name` supplies the text shown to readers.
+
+Create `src/data/tags/tools.md` for the default language:
+
+```md
+---
+name: Tools
+description: Software and utilities used in these articles.
+---
+
+Notes about the tools covered by this tag.
+```
+
+Reference the ID with `tags: [tools]` in article frontmatter. Add
+`tools.<locale>.md` for another configured language. Use the same ID in each
+language version of the article.
+
+| Field         | Meaning                                                        |
+| ------------- | -------------------------------------------------------------- |
+| `name`        | Required, nonempty display name.                               |
+| `description` | Optional short description for tag pages and sharing metadata. |
+| Markdown body | Optional introduction before related articles.                 |
+| `draft`       | Set to `true` to hide this language's tag metadata.            |
+| `aliases`     | Optional old URL segments that redirect to this tag.           |
+
+#### Routes And Languages
+
+For each language, an ID gets a page at `/<locale>/tags/<id>/` when at least one
+public article in that language uses it. Each article counts once per ID.
+
+Tag pages display the name, description, and Markdown body from the published
+tag file for the current language. If that file is missing or marked as a draft,
+the page uses the ID as its name and a general description. References to
+undefined IDs produce warnings with article paths.
+
+The language switcher opens the same ID when the target language has public
+articles for it; otherwise it opens that language's tag list.
+
+#### Aliases And Conflicts
+
+An alias preserves an old tag URL. For example, `aliases: [old-tools]` in
+`tools.en.md` redirects `/en/tags/old-tools/` to `/en/tags/tools/` when that
+definition is published and English articles create the destination page.
+Redirects preserve pagination.
+
+- IDs and aliases use a single nonempty URL segment. Validation rejects `.` and
+  `..`, whitespace, control characters, and `/`, `\`, `?`, `#`, `%`.
+- Conflict checks use lowercase text after Unicode NFC normalization. IDs and
+  URLs keep their original spelling.
+- Public tag IDs must be unique under this comparison in each language.
+  Conflicts such as `Tools` and `tools` stop the build.
+- All defined and referenced IDs reserve their URL segments. Canonical IDs take
+  priority over aliases. Invalid or competing aliases produce warnings and are
+  skipped.
+
+#### Page Content, Search, And Sharing
+
+The tag list shows each name, article count, and short description. Tag detail
+pages show the current language's description and Markdown introduction before
+related articles. Missing descriptions use localized general text.
+
+Markdown appears only on the first page; later pages link back to the
+introduction. Tag Markdown headings start at h2 when the source includes an h1.
+
+A tag page gets one search entry when the published tag file for that language
+contains a nonempty description or Markdown body. The entry points to the
+first page and indexes the tag's name, custom description, and Markdown
+introduction.
+
+Tag detail pages publish `CollectionPage` structured data. Search-engine and
+sharing descriptions use the current language's short description or the page's
+general fallback text. Article pages use `BlogPosting` data and include available
+publication and modification dates.
+
 ### Content Git Metadata
 
 Optional Git metadata appears below blog and page content, with first-commit
 and edited times and commit hashes. Matching first and latest commits omit the
 edited time; missing data uses a localized unknown label. SHA-1 and SHA-256
 hashes are supported.
+
+When `SITE.contentGitMeta.enabled` is `true`, tags show Git metadata on the first
+page if the current language's published tag file has a nonempty description or
+Markdown body. Dates come from that file's history and use `SITE.timezone`.
 
 Metadata comes from the committed `src/generated/contentGitMetaManifest.json`.
 
