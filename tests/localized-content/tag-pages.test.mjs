@@ -37,15 +37,24 @@ const sources = new Map([
   ["astro:content", contentSource],
   ["astro/components/viewtransitions.css", "export {};"],
   [
+    "astro:env/client",
+    "export const PUBLIC_GOOGLE_SITE_VERIFICATION = undefined;",
+  ],
+  [
+    "astro:assets",
+    `import {createComponent, render} from ${JSON.stringify(runtimeUrl)}; export const Font = createComponent(() => render\`\`);`,
+  ],
+  [
+    "astro:transitions",
+    `import {createComponent, render} from ${JSON.stringify(runtimeUrl)}; export const ClientRouter = createComponent(() => render\`\`);`,
+  ],
+  [path.join(siteRoot, "src/styles/global.css"), "export {};"],
+  [
     manifestFile,
     "export const entries = {}; export default {version: 1, entries};",
   ],
 ]);
-for (const file of [
-  "layouts/Layout.astro",
-  "components/Header.astro",
-  "components/Footer.astro",
-])
+for (const file of ["components/Header.astro", "components/Footer.astro"])
   sources.set(path.join(siteRoot, "src", file), "<slot />");
 sources.set(
   path
@@ -80,12 +89,12 @@ for (const file of [
 const { getTagIndex } = await import(
   moduleUrl(path.join(siteRoot, "src/utils/getTagIndex.ts"))
 );
-const { default: TagDetail } = await import(
+const { default: RawTagDetail } = await import(
   await componentUrl(
     path.join(siteRoot, "src/pages/[locale]/tags/[tag]/[...page].astro")
   )
 );
-const { default: Overview } = await import(
+const { default: RawOverview } = await import(
   await componentUrl(path.join(siteRoot, "src/pages/[locale]/tags/index.astro"))
 );
 const { default: Main } = await import(
@@ -94,6 +103,25 @@ const { default: Main } = await import(
 const { rendered } = await import(moduleUrl("astro:content"));
 const { entries: gitEntries } = await import(moduleUrl(manifestFile));
 const { SITE } = await import(moduleUrl(path.join(siteRoot, "src/config.ts")));
+const { default: RawLayout } = await import(
+  await componentUrl(path.join(siteRoot, "src/layouts/Layout.astro"))
+);
+const { createComponent } = await import(runtimeUrl);
+// Astro 5.16's container omits the configured site from its render context.
+function withSite(component) {
+  return createComponent((result, props, slots) => {
+    const createAstro = result.createAstro;
+    result.createAstro = (...args) => {
+      const astro = createAstro(...args);
+      astro.site = new URL(SITE.website);
+      return astro;
+    };
+    return component(result, props, slots);
+  });
+}
+const TagDetail = withSite(RawTagDetail);
+const Overview = withSite(RawOverview);
+const Layout = withSite(RawLayout);
 const container = await AstroContainer.create();
 
 const post = (id, tags = ["frontend"]) => ({
@@ -566,4 +594,188 @@ test("indexes only custom introductions and excludes navigation, metadata and ar
     request: new Request("https://example.com/en/posts"),
   });
   assert.ok(!main.includes("data-pagefind-body"));
+});
+
+test("publishes localized collection metadata and canonical URLs on every tag page", async () => {
+  const cases = [
+    { postId: "sample", docs: [], summary: "所有带有标签 “frontend” 的文章。" },
+    {
+      postId: "sample",
+      docs: [entry("frontend")],
+      summary: "所有带有标签 “Astro” 的文章。",
+    },
+    {
+      postId: "sample",
+      docs: [entry("frontend", { description: "中文说明" })],
+      summary: "中文说明",
+    },
+    {
+      postId: "sample.en",
+      docs: [
+        entry("frontend", { description: "中文说明" }),
+        entry("frontend.en", {
+          name: "English tag",
+          description: "English summary",
+        }),
+      ],
+      summary: "English summary",
+    },
+    {
+      postId: "sample.en",
+      docs: [
+        entry("frontend", { description: "中文说明" }),
+        entry("frontend.en", { draft: true, description: "Draft summary" }),
+      ],
+      summary: 'All the articles with the tag "frontend".',
+    },
+    {
+      postId: "sample.en",
+      tagId: "主题",
+      docs: [entry("主题.en", { name: "Topic", description: "Topic summary" })],
+      summary: "Topic summary",
+    },
+  ];
+  for (const { postId, tagId = "frontend", docs, summary } of cases) {
+    const tag = getTagIndex([post(postId, [tagId])], docs).tags[0];
+    for (const page of [1, 2]) {
+      const html = await container.renderToString(
+        TagDetail,
+        detailOptions(tag, page)
+      );
+      const blocks = [
+        ...html.matchAll(
+          /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g
+        ),
+      ];
+      assert.equal(blocks.length, 1);
+      const data = JSON.parse(blocks[0][1]);
+      const canonical =
+        "https://example.com/" +
+        tag.locale +
+        "/tags/" +
+        encodeURIComponent(tagId) +
+        (page > 1 ? "/" + page : "");
+      assert.equal(data["@type"], "CollectionPage");
+      assert.equal(
+        data.name,
+        (tag.locale === "zh" ? "标签： " : "Tag: ") +
+          tag.tagName +
+          " | " +
+          SITE.title
+      );
+      assert.equal(data.description, summary);
+      assert.equal(data.url, canonical);
+      assert.ok(!("datePublished" in data) && !("dateModified" in data));
+      assert.ok(!blocks[0][1].includes("undefined"));
+      assert.ok(html.includes('rel="canonical" href="' + canonical + '"'));
+      assert.ok(
+        !html.includes('property="article:published_time"') &&
+          !html.includes('property="article:modified_time"')
+      );
+      const descriptions = [
+        ...html.matchAll(
+          /<meta (?:name|property)="(description|og:description|twitter:description)" content="([^"]*)"/g
+        ),
+      ];
+      assert.equal(descriptions.length, 3);
+      for (const [, name, value] of descriptions)
+        assert.equal(
+          value.replace(/&#34;|&quot;/g, '"').replaceAll("&amp;", "&"),
+          summary,
+          name
+        );
+    }
+  }
+});
+
+test("retains article structured data and omits unavailable dates", async () => {
+  const published = new Date("2024-01-01T00:00:00Z");
+  const edited = new Date("2024-02-01T00:00:00Z");
+  const cases = [
+    { pubDatetime: published, modDatetime: edited },
+    { pubDatetime: published },
+    { pubDatetime: published, modDatetime: null },
+    {},
+  ];
+  for (const dates of cases) {
+    const html = await container.renderToString(Layout, {
+      props: {
+        locale: "en",
+        title: "Article",
+        ...dates,
+        canonicalURL: "https://example.net/original-article",
+      },
+      request: new Request("https://example.com/en/posts/sample"),
+    });
+    const data = JSON.parse(
+      html.match(
+        /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/
+      )[1]
+    );
+    assert.equal(data["@type"], "BlogPosting");
+    assert.equal(data.headline, "Article");
+    assert.equal(data.author[0].name, SITE.author);
+    assert.equal("datePublished" in data, Boolean(dates.pubDatetime));
+    assert.equal("dateModified" in data, Boolean(dates.modDatetime));
+    if (dates.pubDatetime)
+      assert.equal(data.datePublished, published.toISOString());
+    if (dates.modDatetime)
+      assert.equal(data.dateModified, edited.toISOString());
+    assert.equal(
+      html.includes('property="article:published_time"'),
+      Boolean(dates.pubDatetime)
+    );
+    assert.equal(
+      html.includes('property="article:modified_time"'),
+      Boolean(dates.modDatetime)
+    );
+    assert.ok(
+      html.includes(
+        'rel="canonical" href="https://example.net/original-article"'
+      )
+    );
+    assert.ok(!html.includes('"undefined"'));
+  }
+  const collection = await container.renderToString(Layout, {
+    props: {
+      locale: "en",
+      structuredDataType: "CollectionPage",
+      pubDatetime: published,
+      modDatetime: edited,
+    },
+    request: new Request("https://example.com/en/tags/example"),
+  });
+  assert.ok(
+    !collection.includes("datePublished") &&
+      !collection.includes("dateModified")
+  );
+  assert.ok(
+    !collection.includes("article:published_time") &&
+      !collection.includes("article:modified_time")
+  );
+});
+
+test("preserves content text without letting it close the JSON-LD script", async () => {
+  const title = "Example </script><script>unexpected()</script>";
+  const description = 'A <tag> & "quoted" description';
+  const html = await container.renderToString(Layout, {
+    props: {
+      locale: "en",
+      structuredDataType: "CollectionPage",
+      title,
+      description,
+    },
+    request: new Request("https://example.com/en/tags/example"),
+  });
+  const blocks = [
+    ...html.matchAll(
+      /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g
+    ),
+  ];
+  assert.equal(blocks.length, 1);
+  assert.ok(blocks[0][1].includes("\\u003c/script>"));
+  const data = JSON.parse(blocks[0][1]);
+  assert.equal(data.name, title);
+  assert.equal(data.description, description);
+  assert.ok(!blocks[0][1].includes("<"));
 });
