@@ -183,7 +183,7 @@ const summary =
           >{
             t(
               locale,
-              page.total === 1
+              new Intl.PluralRules(locale).select(page.total) === "one"
                 ? "tag.articleCount.one"
                 : "tag.articleCount.other"
             ).replace(

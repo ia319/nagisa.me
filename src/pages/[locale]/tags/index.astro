@@ -61,7 +61,7 @@ const { locale, tags } = Astro.props;
               <span class="text-sm text-foreground/70">
                 {t(
                   locale,
-                  count === 1
+                  new Intl.PluralRules(locale).select(count) === "one"
                     ? "tag.articleCount.one"
                     : "tag.articleCount.other"
                 ).replace(
