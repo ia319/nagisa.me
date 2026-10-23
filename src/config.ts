@@ -1,9 +1,9 @@
 export const SITE = {
-  website: "https://example.com",
-  author: "Author",
-  profile: "/",
-  desc: "A minimal, responsive and SEO-friendly blog.",
-  title: "Blog",
+  website: "https://nagisa.me",
+  author: "ia",
+  profile: "https://github.com/ia319",
+  desc: "Articles, notes, and thoughts by ia.",
+  title: "Nagisa",
   ogImage: "",
   repository: "https://github.com/ia319/nagisa.me",
   contentGitMeta: {
