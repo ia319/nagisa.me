@@ -42,7 +42,9 @@ const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
     class="app-layout"
   >
     <section id="hero" class:list={["pt-8 pb-6", "border-b border-border"]}>
-      <h1 class="my-4 inline-block text-4xl font-bold sm:my-8 sm:text-5xl">
+      <h1
+        class="my-4 inline-block text-4xl font-semibold text-foreground/90 sm:my-8 sm:text-5xl"
+      >
         {t(locale, "home.hero")}
       </h1>
       <a

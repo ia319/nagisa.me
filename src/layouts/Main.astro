@@ -21,7 +21,7 @@ const backUrl = SITE.showBackButton ? Astro.url.pathname : "/";
 <Breadcrumb {locale} items={props.breadcrumbs} />
 <main data-backUrl={backUrl} id="main-content" class="app-layout pb-4">
   <h1
-    class="text-2xl font-semibold sm:text-3xl"
+    class="text-2xl font-semibold text-foreground/90 sm:text-3xl"
     data-pagefind-body={props.searchableHeader ? true : undefined}
   >
     {

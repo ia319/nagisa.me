@@ -13,6 +13,11 @@
       @apply mb-3 text-foreground;
     }
 
+    h1,
+    h2 {
+      @apply font-semibold text-foreground/90;
+    }
+
     h3 {
       @apply italic;
     }
@@ -28,7 +33,12 @@
     }
 
     a {
-      @apply wrap-break-word text-foreground decoration-dashed underline-offset-4 hover:text-accent focus-visible:no-underline;
+      @apply wrap-break-word text-accent decoration-dashed underline-offset-4 hover:decoration-solid focus-visible:no-underline;
+    }
+
+    a[href^="#"],
+    a[href^="/"][href*="/tags/"] {
+      @apply text-muted-foreground hover:text-foreground;
     }
 
     ul {
@@ -36,7 +46,7 @@
     }
 
     li {
-      @apply marker:text-accent;
+      @apply marker:text-foreground;
     }
 
     hr {
@@ -75,7 +85,7 @@
     }
 
     blockquote {
-      @apply border-s-accent/80 wrap-break-word opacity-80;
+      @apply border-s-border wrap-break-word opacity-80;
     }
 
     details {
