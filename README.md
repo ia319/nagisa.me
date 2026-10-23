@@ -378,3 +378,11 @@ export const SITE = {
 `pnpm build` generates Pagefind search assets in `dist/pagefind/` and copies them
 to `public/pagefind/` for development, on Windows and POSIX. Local search reflects
 the last production build.
+
+## Licensing
+
+Site code, engineering documentation, and starter examples on `dev` and `main`
+use the [MIT License](LICENSE). Preserve the existing copyright and license notices.
+
+Original blog content by ia on `main` uses [CC0 1.0](CONTENT-LICENSE.md), unless
+otherwise noted.
