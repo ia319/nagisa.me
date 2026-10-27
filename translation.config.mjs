@@ -1,4 +1,4 @@
 export default {
-  model: "",
+  model: "translategemma:12b",
   port: "auto",
 };
