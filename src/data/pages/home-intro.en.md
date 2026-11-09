@@ -1,6 +1,6 @@
 ---
-title: About This Site
-description: Notes, articles, and site updates.
+title: About
+description: Homepage introduction
 ---
 
-This site collects notes, articles, and site updates in one place.
+Out of a need for self-awareness and self-reflection, I write down my whole self here—my experiences, thoughts, emotions, and desires.
